@@ -10,6 +10,7 @@ export interface UiCallbacks {
   onFinish(): void;
   onMode(m: Mode): void;
   onExport(): void;
+  onHistory(): void;
 }
 
 export interface Ui {
@@ -50,6 +51,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       <div class="toolbar">
         <button id="btn-walk" class="secondary">🚶 走路</button>
         <button id="btn-bike" class="secondary">🚲 骑车</button>
+        <button id="btn-history" class="secondary">📜 历史</button>
       </div>
     </div>
     <div id="toast"></div>
@@ -64,6 +66,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   $('btn-export').addEventListener('click', () => cb.onExport());
   $('btn-walk').addEventListener('click', () => cb.onMode('walk'));
   $('btn-bike').addEventListener('click', () => cb.onMode('bike'));
+  $('btn-history').addEventListener('click', () => cb.onHistory());
 
   let toastTimer: number | undefined;
 

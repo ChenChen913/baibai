@@ -66,22 +66,32 @@ function distToSegM(p: LatLng, a: LatLng, b: LatLng): number {
   return Math.hypot(P.x - t * B.x, P.y - t * B.y);
 }
 
-/** Douglas-Peucker 抽稀：首尾必保留 */
-export function douglasPeucker(pts: LatLng[], epsM: number): LatLng[] {
-  if (pts.length <= 2) return pts.slice();
-  const first = pts[0];
-  const last = pts[pts.length - 1];
+function dpRange(pts: LatLng[], lo: number, hi: number, epsM: number): number[] {
+  if (hi - lo <= 1) return [lo, hi];
+  const first = pts[lo];
+  const last = pts[hi];
   let maxD = -1;
   let maxI = -1;
-  for (let i = 1; i < pts.length - 1; i++) {
+  for (let i = lo + 1; i < hi; i++) {
     const d = distToSegM(pts[i], first, last);
     if (d > maxD) {
       maxD = d;
       maxI = i;
     }
   }
-  if (maxD <= epsM) return [first, last];
-  const left = douglasPeucker(pts.slice(0, maxI + 1), epsM);
-  const right = douglasPeucker(pts.slice(maxI), epsM);
+  if (maxD <= epsM) return [lo, hi];
+  const left = dpRange(pts, lo, maxI, epsM);
+  const right = dpRange(pts, maxI, hi, epsM);
   return [...left.slice(0, -1), ...right];
+}
+
+/** Douglas-Peucker 抽稀：返回保留点下标（首尾必保留；供回放对齐时间轴） */
+export function douglasPeuckerKeep(pts: LatLng[], epsM: number): number[] {
+  if (pts.length <= 2) return pts.map((_, i) => i);
+  return dpRange(pts, 0, pts.length - 1, epsM);
+}
+
+/** Douglas-Peucker 抽稀：返回保留点坐标（首尾必保留） */
+export function douglasPeucker(pts: LatLng[], epsM: number): LatLng[] {
+  return douglasPeuckerKeep(pts, epsM).map((i) => pts[i]);
 }

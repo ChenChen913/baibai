@@ -63,7 +63,7 @@ export interface Checkpoint {
 }
 
 let seq = 0;
-function newId(prefix: string): string {
+export function newId(prefix: string): string {
   seq += 1;
   return `${prefix}_${Date.now().toString(36)}_${seq.toString(36)}`;
 }

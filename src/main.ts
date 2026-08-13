@@ -1,22 +1,27 @@
-/** M1 入口：状态机 + GPS + IndexedDB + UI 全流程接线 */
+/** M1 入口：状态机 + GPS + IndexedDB + UI 全流程接线（含 记录/历史/回顾 视图路由） */
 
 import './style.css';
 import { RecorderState } from './state.js';
 import { GpsTracker } from './gps.js';
-import { mountUi } from './ui.js';
+import { mountUi, type Ui } from './ui.js';
+import { mountReviewView } from './review-ui.js';
+import type { SessionData } from './state.js';
 import {
   clearActive,
   exportAllJson,
+  listSessions,
   loadActive,
   saveActive,
   saveSession,
 } from './db.js';
 import type { Fix } from './geo.js';
 
+const app = document.querySelector<HTMLElement>('#app')!;
 const gps = new GpsTracker();
 let recorder: RecorderState | null = null;
 let pendingStart = false;
 let wakeLock: { release: () => Promise<void> } | null = null;
+let view: 'record' | 'history' | 'review' = 'record';
 
 const now = (): number => Date.now();
 const vibrate = (): void => {
@@ -36,61 +41,70 @@ function elapsedMs(): number {
   return Math.max(0, now() - t0);
 }
 
-const ui = mountUi(document.querySelector<HTMLElement>('#app')!, {
-  onStart() {
-    if (recorder) return;
-    pendingStart = true;
-    try {
-      gps.start(onFix);
-      void requestWakeLock();
-      ui.toast('正在获取定位…');
-    } catch (e) {
-      pendingStart = false;
-      ui.toast(e instanceof Error ? e.message : '定位启动失败');
-    }
-  },
-  onPause() {
-    if (!recorder) return;
-    try {
-      recorder.pause(gps.recent(3), now());
+function mountRecord(): Ui {
+  return mountUi(app, {
+    onStart() {
+      if (recorder) return;
+      pendingStart = true;
+      try {
+        gps.start(onFix);
+        void requestWakeLock();
+        ui.toast('正在获取定位…');
+      } catch (e) {
+        pendingStart = false;
+        ui.toast(e instanceof Error ? e.message : '定位启动失败');
+      }
+    },
+    onPause() {
+      if (!recorder) return;
+      try {
+        recorder.pause(gps.recent(3), now());
+        vibrate();
+        flush();
+      } catch (e) {
+        ui.toast((e as Error).message);
+      }
+    },
+    onResume() {
+      if (!recorder) return;
+      recorder.resume(now());
       vibrate();
       flush();
-    } catch (e) {
-      ui.toast((e as Error).message);
-    }
-  },
-  onResume() {
-    if (!recorder) return;
-    recorder.resume(now());
-    vibrate();
-    flush();
-  },
-  onUndo() {
-    if (!recorder) return;
-    if (recorder.undo()) {
+    },
+    onUndo() {
+      if (!recorder) return;
+      if (recorder.undo()) {
+        flush();
+      } else {
+        ui.toast('没有可撤销的操作');
+      }
+    },
+    onFinish() {
+      if (!recorder) return;
+      const res = recorder.finish(gps.recent(3), now());
+      if (!res.ok) {
+        const go = ui.confirm(
+          `当前位置距 Home 约 ${Math.round(res.distM)} 米，仍要结束吗？`,
+        );
+        if (!go) return;
+        recorder.finish(gps.recent(3), now(), true);
+      }
+      complete();
+    },
+    onMode(m) {
+      recorder?.setMode(m, now());
       flush();
-    } else {
-      ui.toast('没有可撤销的操作');
-    }
-  },
-  onFinish() {
-    if (!recorder) return;
-    const res = recorder.finish(gps.recent(3), now());
-    if (!res.ok) {
-      const go = ui.confirm(`当前位置距 Home 约 ${Math.round(res.distM)} 米，仍要结束吗？`);
-      if (!go) return;
-      recorder.finish(gps.recent(3), now(), true);
-    }
-    complete();
-  },
-  onMode(m) {
-    recorder?.setMode(m, now());
-    flush();
-  },
-  onExport() {
-    void doExport();
-  },
-});
+    },
+    onExport() {
+      void doExport();
+    },
+    onHistory() {
+      void showHistory();
+    },
+  });
+}
+
+let ui: Ui = mountRecord();
 
 function onFix(f: Fix): void {
   if (pendingStart && !recorder) {
@@ -121,10 +135,12 @@ function complete(): void {
   if (!recorder) return;
   gps.stop();
   void releaseWakeLock();
-  void saveSession(recorder.snapshot).catch((e) => console.warn('[db]', e));
+  const saved = recorder.snapshot;
+  recorder = null;
+  void saveSession(saved).catch((e) => console.warn('[db]', e));
   void clearActive();
   vibrate();
-  ui.toast('已保存本次拜年 🎉');
+  showReview(saved);
 }
 
 async function requestWakeLock(): Promise<void> {
@@ -158,6 +174,48 @@ async function doExport(): Promise<void> {
   ui.toast('已导出备份 JSON');
 }
 
+function showReview(sess: SessionData): void {
+  view = 'review';
+  mountReviewView(app, sess, {
+    onBack: () => void showHistory(),
+    onSave: (s2) => void saveSession(s2).catch((e) => console.warn('[db]', e)),
+  });
+}
+
+async function showHistory(): Promise<void> {
+  view = 'history';
+  const sessions = (await listSessions()).sort((a, b) => b.createdAt - a.createdAt);
+  app.innerHTML = `
+    <div class="wrap">
+      <header><h1>🧧 历史记录</h1></header>
+      <button id="h-back" class="secondary">← 返回记录</button>
+      <div id="h-list" class="history-list"></div>
+    </div>`;
+  app.querySelector<HTMLElement>('#h-back')!.addEventListener('click', () => {
+    view = 'record';
+    ui = mountRecord();
+    if (recorder) {
+      // 回到记录页后恢复显示当前状态
+    }
+  });
+  const list = app.querySelector<HTMLElement>('#h-list')!;
+  list.innerHTML =
+    sessions.length === 0
+      ? '<p class="empty">还没有记录。大年初一，出发！</p>'
+      : sessions
+          .map(
+            (s) =>
+              `<button class="history-item" data-id="${s.id}">📅 ${s.date} · ${s.nodes.length} 户 · ${s.visits.length} 次到访</button>`,
+          )
+          .join('');
+  list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const sess = sessions.find((x) => x.id === b.dataset.id);
+      if (sess) showReview(sess);
+    });
+  });
+}
+
 async function boot(): Promise<void> {
   try {
     const ck = await loadActive();
@@ -176,7 +234,11 @@ async function boot(): Promise<void> {
   }
 }
 
-setInterval(() => ui.render(recorder?.snapshot ?? null, elapsedMs()), 1000);
+setInterval(() => {
+  if (view === 'record') {
+    ui.render(recorder?.snapshot ?? null, elapsedMs());
+  }
+}, 1000);
 setInterval(flush, 10_000); // D22：每 10s 检查点落盘
 ui.render(null, 0);
 void boot();

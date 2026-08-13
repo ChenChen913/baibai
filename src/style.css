@@ -101,3 +101,166 @@ button.active {
 #toast.show {
   opacity: 1;
 }
+
+/* ---------- 回顾页 / 历史 ---------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.bar-title {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+button.small {
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.stat-line {
+  opacity: 0.75;
+  margin-bottom: 12px;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.canvas-box {
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.canvas-box svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.track-base {
+  fill: none;
+  stroke: rgba(200, 64, 47, 0.18);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.track-play {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.dot {
+  fill: #fff;
+  stroke: var(--accent2);
+  stroke-width: 3;
+}
+
+.node circle {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.node.home circle {
+  fill: var(--accent2);
+}
+
+.node text {
+  font-size: 15px;
+  fill: var(--ink);
+  text-anchor: middle;
+  font-weight: 600;
+}
+
+.pctrl {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+
+.pctrl-time {
+  opacity: 0.8;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.section h2 {
+  font-size: 16px;
+  margin: 22px 0 8px;
+}
+
+.node-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.node-row input {
+  border: 1px solid rgba(200, 64, 47, 0.3);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 15px;
+  background: rgba(255, 255, 255, 0.6);
+  flex: 1;
+  min-width: 120px;
+  color: var(--ink);
+}
+
+.nlabel {
+  font-weight: 700;
+}
+
+.visits {
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.merge-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(200, 64, 47, 0.3);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.jump-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  opacity: 0.8;
+  margin-bottom: 4px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.history-item {
+  text-align: left;
+}
+
+.empty {
+  opacity: 0.6;
+}
