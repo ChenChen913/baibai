@@ -18,10 +18,50 @@ body {
   min-height: 100vh;
 }
 
+/* D21：白天暖色年味装饰——边缘虚化低透明的礼花/炮仗，绝不进主体 */
+.decor {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.decor-item {
+  position: absolute;
+  opacity: 0.16;
+  filter: blur(1.5px);
+}
+
+.decor-firework {
+  width: 150px;
+  top: -30px;
+  left: -30px;
+}
+
+.decor-firework2 {
+  width: 110px;
+  bottom: -20px;
+  right: -20px;
+  transform: rotate(160deg);
+}
+
+.decor-cracker {
+  width: 60px;
+  bottom: 8vh;
+  left: 6px;
+}
+
 .wrap {
+  position: relative;
+  z-index: 1;
   max-width: 480px;
   margin: 0 auto;
   padding: 24px 20px 80px;
+}
+
+#app {
+  position: relative;
+  z-index: 1;
 }
 
 header h1 {

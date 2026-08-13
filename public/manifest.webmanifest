@@ -1,0 +1,23 @@
+{
+  "name": "拜拜 · 乡村拜年轨迹复盘",
+  "short_name": "拜拜",
+  "description": "大年初一走村串户，记录轨迹、复盘最优拜年路线",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fff7ec",
+  "theme_color": "#c8402f",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

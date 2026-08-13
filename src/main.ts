@@ -291,3 +291,12 @@ setInterval(() => {
 setInterval(flush, 10_000); // D22：每 10s 检查点落盘
 ui.render(null, 0);
 void boot();
+
+// PWA 离线：仅生产环境注册（开发环境不缓存，避免 HMR 污染）
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('./sw.js')
+      .catch((e) => console.warn('[sw]', e));
+  });
+}
