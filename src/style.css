@@ -1,9 +1,15 @@
 :root {
-  --bg1: #fff7ec;
-  --bg2: #ffe7d2;
+  --bg1: #fff8ee;
+  --bg2: #ffe9d4;
+  --bg3: #ffdfc2;
   --accent: #c8402f;
+  --accent-deep: #a92f22;
   --accent2: #e8a23d;
   --ink: #5a3a2a;
+  --ink-soft: rgba(90, 58, 42, 0.62);
+  --card: rgba(255, 255, 255, 0.66);
+  --line: rgba(200, 64, 47, 0.16);
+  --shadow: 0 10px 30px rgba(90, 58, 42, 0.1);
 }
 
 * {
@@ -12,8 +18,11 @@
 
 body {
   margin: 0;
-  font-family: system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  background: linear-gradient(160deg, var(--bg1), var(--bg2));
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(232, 162, 61, 0.14), transparent 60%),
+    radial-gradient(900px 420px at -10% 110%, rgba(200, 64, 47, 0.1), transparent 60%),
+    linear-gradient(165deg, var(--bg1), var(--bg2) 55%, var(--bg3));
   color: var(--ink);
   min-height: 100vh;
 }
@@ -51,7 +60,44 @@ body {
   left: 8px;
 }
 
-/* SVG 线性图标 */
+.wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 22px 18px 96px;
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- 通用 ---------- */
+
+button {
+  border: 0;
+  border-radius: 999px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
 .icon {
   width: 17px;
   height: 17px;
@@ -60,82 +106,40 @@ body {
   margin-right: 6px;
 }
 
-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  box-shadow: none;
-  transform: none;
-}
-
-.wrap {
-  position: relative;
-  z-index: 1;
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 24px 20px 80px;
-}
-
-#app {
-  position: relative;
-  z-index: 1;
-}
-
-header h1 {
+/* 主按钮 */
+.primary {
+  width: 100%;
+  padding: 18px 24px;
   font-size: 20px;
-  font-weight: 700;
-  margin: 0;
-}
-
-.status {
-  font-size: 34px;
-  font-weight: 800;
-  margin: 36px 0 8px;
-}
-
-.meta {
-  opacity: 0.75;
-  margin-bottom: 32px;
-  font-variant-numeric: tabular-nums;
-}
-
-.buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-button {
-  border: 0;
-  border-radius: 999px;
-  padding: 16px 26px;
-  font-size: 18px;
-  font-weight: 600;
-  background: linear-gradient(135deg, var(--accent), #d86a3c);
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, var(--accent), #d86a3c 60%, var(--accent2));
   color: #fff;
-  box-shadow: 0 6px 18px rgba(200, 64, 47, 0.25);
-  cursor: pointer;
-  transition: transform 0.1s ease;
+  box-shadow: 0 12px 28px rgba(200, 64, 47, 0.3);
 }
 
-button:active {
-  transform: scale(0.97);
+.primary.danger {
+  background: linear-gradient(135deg, var(--accent-deep), var(--accent));
 }
 
-button.secondary {
-  background: rgba(255, 255, 255, 0.75);
+/* 幽灵按钮（次级） */
+.ghost,
+.secondary {
+  background: rgba(255, 255, 255, 0.72);
   color: var(--ink);
+  border: 1px solid var(--line);
   box-shadow: none;
+  font-size: 14px;
+  padding: 9px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
 }
 
-button.active {
+.ghost.active {
   background: linear-gradient(135deg, var(--accent2), #f0b75e);
   color: #fff;
-}
-
-.toolbar {
-  margin-top: 36px;
-  display: flex;
-  gap: 10px;
+  border-color: transparent;
 }
 
 #toast {
@@ -143,33 +147,212 @@ button.active {
   left: 50%;
   bottom: 44px;
   transform: translateX(-50%);
-  background: rgba(90, 58, 42, 0.92);
+  background: rgba(90, 58, 42, 0.94);
   color: #fff;
-  padding: 10px 20px;
+  padding: 11px 22px;
   border-radius: 999px;
   font-size: 15px;
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
-  max-width: 90vw;
+  max-width: 88vw;
+  z-index: 1200;
 }
 
 #toast.show {
   opacity: 1;
 }
 
-/* ---------- 回顾页 / 历史 ---------- */
+/* ---------- 记录页（驾驶舱） ---------- */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.brand {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.brand-mark {
+  margin-right: 6px;
+}
+
+.brand-sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  margin-left: 8px;
+  letter-spacing: 1px;
+}
+
+.year-chip {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(232, 162, 61, 0.5);
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.stat-card {
+  background: var(--card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 22px 20px 18px;
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+}
+
+.status {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  margin-bottom: 4px;
+}
+
+.meta {
+  color: var(--ink-soft);
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  text-align: center;
+}
+
+.stat b {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.stat span {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.stat-divider {
+  width: 1px;
+  height: 34px;
+  background: var(--line);
+}
+
+.map-card {
+  position: relative;
+  z-index: 0;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+  background: #f3ead9;
+}
+
+.map-card #map {
+  height: 250px;
+}
+
+.map-cap {
+  font-size: 11px;
+  color: var(--ink-soft);
+  text-align: center;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.55);
+  border-top: 1px solid var(--line);
+}
+
+/* 地图标记 */
+.home-pin,
+.node-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(90, 58, 42, 0.3);
+}
+
+.home-pin {
+  background: linear-gradient(135deg, var(--accent2), #f0b75e);
+  font-size: 14px;
+}
+
+.node-pin {
+  background: linear-gradient(135deg, var(--accent), #d86a3c);
+  font-size: 13px;
+}
+
+.primary-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.side-zone {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.side-zone .ghost {
+  padding: 9px 22px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px;
+}
+
+.toolbar .ghost {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 10px 6px;
+}
+
+.toolbar .ghost.active {
+  background: linear-gradient(135deg, var(--accent2), #f0b75e);
+  color: #fff;
+}
+
+/* ---------- 回顾页 / 三线对比 / 清单 / 历史 ---------- */
 
 .bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .bar-title {
-  font-weight: 700;
-  font-size: 16px;
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: 1px;
 }
 
 button.small {
@@ -178,16 +361,20 @@ button.small {
 }
 
 .stat-line {
-  opacity: 0.75;
+  color: var(--ink-soft);
   margin-bottom: 12px;
   font-variant-numeric: tabular-nums;
   font-size: 14px;
 }
 
 .canvas-box {
-  background: rgba(255, 255, 255, 0.55);
-  border-radius: 16px;
+  background: var(--card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
   overflow: hidden;
+  box-shadow: var(--shadow);
 }
 
 .canvas-box svg {
@@ -198,7 +385,7 @@ button.small {
 
 .track-base {
   fill: none;
-  stroke: rgba(200, 64, 47, 0.18);
+  stroke: rgba(200, 64, 47, 0.2);
   stroke-width: 4;
   stroke-linecap: round;
 }
@@ -248,9 +435,23 @@ button.small {
   font-size: 13px;
 }
 
+.section {
+  background: var(--card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px 16px;
+  margin-top: 14px;
+  box-shadow: var(--shadow);
+}
+
 .section h2 {
-  font-size: 16px;
-  margin: 22px 0 8px;
+  font-size: 15px;
+  margin: 4px 0 12px;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent2);
+  letter-spacing: 1px;
 }
 
 .node-row {
@@ -258,18 +459,23 @@ button.small {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 14px;
 }
 
 .node-row input {
-  border: 1px solid rgba(200, 64, 47, 0.3);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 15px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.85);
   flex: 1;
   min-width: 120px;
   color: var(--ink);
+  font-family: inherit;
 }
 
 .nlabel {
@@ -291,10 +497,11 @@ button.small {
 select {
   padding: 8px 10px;
   border-radius: 10px;
-  border: 1px solid rgba(200, 64, 47, 0.3);
-  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.85);
   font-size: 14px;
   color: var(--ink);
+  font-family: inherit;
 }
 
 .jump-row {
@@ -302,19 +509,26 @@ select {
   gap: 8px;
   align-items: center;
   font-size: 13px;
-  opacity: 0.8;
-  margin-bottom: 4px;
+  opacity: 0.85;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 
 .history-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .history-item {
   text-align: left;
+  padding: 14px 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  font-size: 15px;
+  box-shadow: 0 4px 14px rgba(90, 58, 42, 0.06);
 }
 
 .empty {
@@ -331,22 +545,27 @@ select {
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.6);
-  border-radius: 14px;
-  padding: 12px 16px;
+  background: var(--card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px 16px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  box-shadow: 0 4px 14px rgba(90, 58, 42, 0.06);
 }
 
 .card span {
   font-size: 13px;
-  opacity: 0.75;
+  color: var(--ink-soft);
 }
 
 .card b {
   font-size: 22px;
   color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
 
 .opt-actual {
@@ -374,8 +593,8 @@ select {
 
 .hint {
   font-size: 13px;
-  opacity: 0.7;
-  margin: 8px 0 0;
+  opacity: 0.72;
+  margin: 10px 0 0;
 }
 
 .chip {

@@ -1,9 +1,11 @@
 /** M1 入口：状态机 + GPS + IndexedDB + UI 全流程接线（含 记录/历史/回顾 视图路由） */
 
 import './style.css';
+import 'leaflet/dist/leaflet.css';
 import { RecorderState } from './state.js';
 import { GpsTracker } from './gps.js';
 import { mountUi, type Ui } from './ui.js';
+import { mountMap, type MapController } from './map-ui.js';
 import { mountReviewView } from './review-ui.js';
 import { mountOptimizeView } from './optimize-ui.js';
 import { mountPlanView } from './plan-ui.js';
@@ -28,11 +30,28 @@ let recorder: RecorderState | null = null;
 let pendingStart = false;
 let wakeLock: { release: () => Promise<void> } | null = null;
 let view: 'record' | 'history' | 'review' | 'optimize' | 'plan' = 'record';
+let mapCtrl: MapController | null = null;
 
 const now = (): number => Date.now();
 const vibrate = (): void => {
   navigator.vibrate?.(50);
 };
+
+/** 把当前会话状态同步到地图（轨迹/节点/Home/当前位置） */
+function syncMap(): void {
+  if (!mapCtrl || !recorder) return;
+  const s = recorder.snapshot;
+  mapCtrl.setTrack(s.points.map((p) => p.pos));
+  mapCtrl.setNodes(s.home, s.nodes);
+  const last = s.points[s.points.length - 1];
+  if (last) mapCtrl.follow(last.pos.lat, last.pos.lng);
+  else mapCtrl.follow(s.home.lat, s.home.lng);
+}
+
+function leaveRecord(): void {
+  mapCtrl?.destroy();
+  mapCtrl = null;
+}
 
 function flush(): void {
   if (recorder) {
@@ -48,7 +67,7 @@ function elapsedMs(): number {
 }
 
 function mountRecord(): Ui {
-  return mountUi(app, {
+  ui = mountUi(app, {
     onStart() {
       if (recorder) return;
       pendingStart = true;
@@ -68,6 +87,7 @@ function mountRecord(): Ui {
         gps.stop(); // SPEC §7：PAUSED 停 GPS（省电 + 防屋内漂移）
         vibrate();
         flush();
+        syncMap();
       } catch (e) {
         ui.toast((e as Error).message);
       }
@@ -82,11 +102,13 @@ function mountRecord(): Ui {
       }
       vibrate();
       flush();
+      syncMap();
     },
     onUndo() {
       if (!recorder) return;
       if (recorder.undo()) {
         flush();
+        syncMap();
       } else {
         ui.toast('没有可撤销的操作');
       }
@@ -119,9 +141,16 @@ function mountRecord(): Ui {
       showPlanView();
     },
   });
+  mapCtrl = mountMap(
+    app.querySelector<HTMLElement>('#map')!,
+    recorder ? recorder.snapshot.home : null,
+  );
+  syncMap();
+  return ui;
 }
 
-let ui: Ui = mountRecord();
+let ui: Ui;
+ui = mountRecord();
 
 function onFix(f: Fix): void {
   if (pendingStart && !recorder) {
@@ -136,12 +165,14 @@ function onFix(f: Fix): void {
     pendingStart = false;
     vibrate();
     flush();
+    syncMap();
     ui.toast('开始记录！到一户按「暂停」');
     return;
   }
   if (recorder) {
     try {
       recorder.addPoint(f.pos, f.acc, now());
+      if (view === 'record') mapCtrl?.follow(f.pos.lat, f.pos.lng);
     } catch {
       /* 非 WALKING 状态，忽略 */
     }
@@ -192,6 +223,7 @@ async function doExport(): Promise<void> {
 }
 
 function showReview(sess: SessionData): void {
+  leaveRecord();
   view = 'review';
   mountReviewView(app, sess, {
     onBack: () => void showHistory(),
@@ -213,6 +245,7 @@ function showReview(sess: SessionData): void {
 }
 
 function showPlanView(): void {
+  leaveRecord();
   view = 'plan';
   mountPlanView(app, new Date().getFullYear(), {
     onBack: () => {
@@ -226,6 +259,7 @@ function showPlanView(): void {
 }
 
 async function showHistory(): Promise<void> {
+  leaveRecord();
   view = 'history';
   const sessions = (await listSessions()).sort((a, b) => b.createdAt - a.createdAt);
   app.innerHTML = `
@@ -275,6 +309,7 @@ async function boot(): Promise<void> {
       if (resume) {
         recorder = RecorderState.restore(ck);
         if (recorder.state === 'WALKING') gps.start(onFix);
+        syncMap();
         ui.toast('已恢复未完成的记录');
       } else {
         await clearActive();

@@ -1,4 +1,4 @@
-/** M1 界面：状态大字 + 大按钮 + 出行方式切换（暖色基础版，视觉精修在 M5） */
+/** M1 记录页界面：驾驶舱布局（状态卡 + 实时地图 + 大主按钮 + 工具条） */
 
 import type { Mode, SessionData } from './state.js';
 import { ICONS } from './icons.js';
@@ -23,9 +23,9 @@ export interface Ui {
 
 const STATE_LABEL: Record<string, string> = {
   IDLE: '待机',
-  WALKING: '🚶 记录中',
-  PAUSED: '🏠 在某户',
-  FINISHED: '✅ 已保存',
+  WALKING: '记录中',
+  PAUSED: '在某户',
+  FINISHED: '已保存',
 };
 
 function fmt(ms: number): string {
@@ -38,23 +38,39 @@ function fmt(ms: number): string {
 
 export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   root.innerHTML = `
-    <div class="wrap">
-      <header><h1>🧧 拜拜 · 拜年轨迹复盘</h1></header>
-      <div class="status" id="status">待机</div>
-      <div class="meta" id="meta"></div>
-      <div class="buttons">
-        <button id="btn-start">开始拜年</button>
-        <button id="btn-pause" class="secondary">暂停 · 到一户</button>
-        <button id="btn-resume" class="secondary">继续</button>
-        <button id="btn-finish">结束拜年</button>
-        <button id="btn-undo" class="secondary">撤销</button>
-        <button id="btn-export" class="secondary">导出数据</button>
+    <div class="wrap record">
+      <header class="top">
+        <div class="brand"><span class="brand-mark">🧧</span>拜拜<span class="brand-sub">拜年轨迹复盘</span></div>
+        <div class="year-chip">大年初一</div>
+      </header>
+      <div class="stat-card">
+        <div class="status" id="status">待机</div>
+        <div class="meta" id="meta"></div>
+        <div class="stat-row">
+          <div class="stat"><b id="stat-count">0</b><span>拜访户数</span></div>
+          <div class="stat-divider"></div>
+          <div class="stat"><b id="stat-time">00:00:00</b><span>本次用时</span></div>
+        </div>
+      </div>
+      <div class="map-card">
+        <div id="map"></div>
+        <div class="map-cap">实时地图 · © OpenStreetMap · 断网自动降级示意模式</div>
+      </div>
+      <div class="primary-zone">
+        <button id="btn-start" class="primary">开始拜年</button>
+        <button id="btn-pause" class="primary">到一户了 · 暂停</button>
+        <button id="btn-resume" class="primary">继续出发</button>
+        <button id="btn-finish" class="primary danger">结束拜年</button>
+        <div class="side-zone">
+          <button id="btn-undo" class="ghost">撤销</button>
+          <button id="btn-export" class="ghost">导出数据</button>
+        </div>
       </div>
       <div class="toolbar">
-        <button id="btn-walk" class="secondary">${ICONS.walk}<span>走路</span></button>
-        <button id="btn-bike" class="secondary">${ICONS.bike}<span>骑车</span></button>
-        <button id="btn-plan" class="secondary">${ICONS.plan}<span>清单</span></button>
-        <button id="btn-history" class="secondary">${ICONS.history}<span>历史</span></button>
+        <button id="btn-walk" class="ghost">${ICONS.walk}<span>走路</span></button>
+        <button id="btn-bike" class="ghost">${ICONS.bike}<span>骑车</span></button>
+        <button id="btn-plan" class="ghost">${ICONS.plan}<span>清单</span></button>
+        <button id="btn-history" class="ghost">${ICONS.history}<span>历史</span></button>
       </div>
     </div>
     <div id="toast"></div>
@@ -86,8 +102,14 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     const st = s?.state ?? 'IDLE';
     $('status').textContent = STATE_LABEL[st] ?? st;
     $('meta').textContent = s
-      ? `已拜访 ${s.visits.length} 户 · ${fmt(elapsedMs)} · ${s.currentMode === 'bike' ? '🚲 骑车' : '🚶 走路'}`
-      : '大年初一出发前，先按「开始拜年」';
+      ? st === 'WALKING'
+        ? '正在记录轨迹，到一户按「暂停」'
+        : st === 'PAUSED'
+          ? '离开时按「继续出发」'
+          : '本次拜年已保存'
+      : '从家门口出发，按「开始拜年」';
+    $('stat-count').textContent = String(s?.visits.length ?? 0);
+    $('stat-time').textContent = fmt(elapsedMs);
     $('btn-start').style.display = st === 'IDLE' ? '' : 'none';
     $('btn-pause').style.display = st === 'WALKING' ? '' : 'none';
     $('btn-resume').style.display = st === 'PAUSED' ? '' : 'none';

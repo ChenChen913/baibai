@@ -11,10 +11,14 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.22",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
   }
 }
