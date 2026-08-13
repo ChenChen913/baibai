@@ -18,24 +18,25 @@ export function jumpSplit(pts: TrackPoint[]): TrackPoint[][] {
   return segs;
 }
 
-/** 段内滑动平均（窗口不跨段、跳过 jump 点；jump 点自身保持原坐标；长度不变） */
+/** 段内滑动平均（窗口不跨段、跳过 jump 点；jump 点与段端点保持原坐标防轨迹被拉短；长度不变） */
 export function movingAverage(pts: TrackPoint[], w = 5): TrackPoint[] {
   const half = Math.floor(w / 2);
+  const n = pts.length;
   return pts.map((p, i) => {
-    if (p.jump) return { ...p }; // 跳变点保持原样
+    if (p.jump || i === 0 || i === n - 1) return { ...p }; // 端点/jump 点保持原样
     const lo = Math.max(0, i - half);
-    const hi = Math.min(pts.length - 1, i + half);
+    const hi = Math.min(n - 1, i + half);
     let lat = 0;
     let lng = 0;
-    let n = 0;
+    let cnt = 0;
     for (let j = lo; j <= hi; j++) {
       if (pts[j].jump) continue;
       lat += pts[j].pos.lat;
       lng += pts[j].pos.lng;
-      n += 1;
+      cnt += 1;
     }
-    if (n === 0) return { ...p };
-    return { ...p, pos: { lat: lat / n, lng: lng / n } };
+    if (cnt === 0) return { ...p };
+    return { ...p, pos: { lat: lat / cnt, lng: lng / cnt } };
   });
 }
 

@@ -55,12 +55,12 @@ describe('movingAverage', () => {
     expect(out[2].pos.lat).toBeCloseTo(0.002, 9);
   });
 
-  it('端点窗口收窄取均值', () => {
-    const pts = [pt(0, 0, 0), pt(2, 0, 1), pt(4, 0, 2)];
+  it('端点保持原坐标（防轨迹两端被拉短），中间点取窗口均值', () => {
+    const pts = [pt(0, 0, 0), pt(1, 0, 1), pt(2, 0, 2), pt(3, 0, 3), pt(4, 0, 4)];
     const out = movingAverage(pts);
-    // w=5, half=2：首点窗口 [0,2] → lat 均值 2
-    expect(out[0].pos.lat).toBeCloseTo(2, 9);
-    expect(out[2].pos.lat).toBeCloseTo(2, 9);
+    expect(out[0].pos.lat).toBe(0); // 端点不动
+    expect(out[4].pos.lat).toBe(4);
+    expect(out[2].pos.lat).toBeCloseTo(2, 9); // 正中窗口均值
   });
 });
 

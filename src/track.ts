@@ -18,7 +18,8 @@ export interface Edge {
 
 interface Stop {
   nodeId: string;
-  t: number;
+  t: number; // 窗口终点（到访时刻）
+  departT: number; // 离开时刻（行程时间 = 下一停靠点 t − 本停靠点 departT）
   mode: Mode;
 }
 
@@ -30,13 +31,18 @@ export function buildEdges(s: SessionData): Edge[] {
   const ordered = [...s.visits].sort((a, b) => a.arriveT - b.arriveT);
 
   const stops: Stop[] = [
-    { nodeId: 'home', t: t0, mode: ordered[0]?.mode ?? s.currentMode },
+    { nodeId: 'home', t: t0, departT: t0, mode: ordered[0]?.mode ?? s.currentMode },
   ];
   for (const v of ordered) {
-    stops.push({ nodeId: v.nodeId, t: v.arriveT, mode: v.mode });
+    stops.push({
+      nodeId: v.nodeId,
+      t: v.arriveT,
+      departT: v.leaveT ?? v.arriveT,
+      mode: v.mode,
+    });
   }
   if (s.finished) {
-    stops.push({ nodeId: 'home', t: tEnd, mode: s.currentMode });
+    stops.push({ nodeId: 'home', t: tEnd, departT: tEnd, mode: s.currentMode });
   }
 
   const edges: Edge[] = [];
@@ -55,7 +61,7 @@ export function buildEdges(s: SessionData): Edge[] {
       fromId: a.nodeId,
       toId: b.nodeId,
       mode: b.mode, // 进入该停靠点的出行方式（D19）
-      departT: a.t,
+      departT: a.departT, // 行程时间基准：上一户的离开时刻
       arriveT: b.t,
       raw,
       smoothed,

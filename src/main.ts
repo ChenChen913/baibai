@@ -5,6 +5,7 @@ import { RecorderState } from './state.js';
 import { GpsTracker } from './gps.js';
 import { mountUi, type Ui } from './ui.js';
 import { mountReviewView } from './review-ui.js';
+import { generateDemoSession } from './demo.js';
 import type { SessionData } from './state.js';
 import {
   clearActive,
@@ -59,6 +60,7 @@ function mountRecord(): Ui {
       if (!recorder) return;
       try {
         recorder.pause(gps.recent(3), now());
+        gps.stop(); // SPEC §7：PAUSED 停 GPS（省电 + 防屋内漂移）
         vibrate();
         flush();
       } catch (e) {
@@ -68,6 +70,11 @@ function mountRecord(): Ui {
     onResume() {
       if (!recorder) return;
       recorder.resume(now());
+      try {
+        gps.start(onFix); // 离开该户重新采样
+      } catch (e) {
+        ui.toast((e as Error).message);
+      }
       vibrate();
       flush();
     },
@@ -189,14 +196,16 @@ async function showHistory(): Promise<void> {
     <div class="wrap">
       <header><h1>🧧 历史记录</h1></header>
       <button id="h-back" class="secondary">← 返回记录</button>
+      <button id="h-demo" class="secondary">🎲 生成演示数据</button>
       <div id="h-list" class="history-list"></div>
     </div>`;
   app.querySelector<HTMLElement>('#h-back')!.addEventListener('click', () => {
     view = 'record';
     ui = mountRecord();
-    if (recorder) {
-      // 回到记录页后恢复显示当前状态
-    }
+  });
+  app.querySelector<HTMLElement>('#h-demo')!.addEventListener('click', () => {
+    // 演示会话不落库，仅在内存中回放/收拾
+    showReview(generateDemoSession());
   });
   const list = app.querySelector<HTMLElement>('#h-list')!;
   list.innerHTML =
