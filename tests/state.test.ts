@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RecorderState,
-  SessionData,
+  Checkpoint,
   HOME_ID,
   MERGE_THRESHOLD_M,
 } from '../src/state.js';
@@ -252,9 +252,7 @@ describe('检查点与恢复（D22）', () => {
     r.resume(T0 + 2000);
     r.addPoint(far(50), 5, T0 + 2100);
     const ck = r.checkpoint();
-    const json = JSON.parse(JSON.stringify(ck)) as {
-      session: SessionData;
-    };
+    const json = JSON.parse(JSON.stringify(ck)) as Checkpoint;
     const r2 = RecorderState.restore(json);
     expect(r2.snapshot).toEqual(ck.session);
   });

@@ -1,0 +1,103 @@
+:root {
+  --bg1: #fff7ec;
+  --bg2: #ffe7d2;
+  --accent: #c8402f;
+  --accent2: #e8a23d;
+  --ink: #5a3a2a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: linear-gradient(160deg, var(--bg1), var(--bg2));
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+.wrap {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+}
+
+header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.status {
+  font-size: 34px;
+  font-weight: 800;
+  margin: 36px 0 8px;
+}
+
+.meta {
+  opacity: 0.75;
+  margin-bottom: 32px;
+  font-variant-numeric: tabular-nums;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 16px 26px;
+  font-size: 18px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--accent), #d86a3c);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(200, 64, 47, 0.25);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+button.secondary {
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+button.active {
+  background: linear-gradient(135deg, var(--accent2), #f0b75e);
+  color: #fff;
+}
+
+.toolbar {
+  margin-top: 36px;
+  display: flex;
+  gap: 10px;
+}
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  background: rgba(90, 58, 42, 0.92);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-size: 15px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  max-width: 90vw;
+}
+
+#toast.show {
+  opacity: 1;
+}

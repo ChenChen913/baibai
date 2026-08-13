@@ -49,11 +49,18 @@ export const GOOD_ACC_M = 50; // ≤50m 精度的 fix 才参与中位数
 export const JUMP_DIST_M = 100; // D22：跳变防护阈值
 export const JUMP_DT_MS = 2000;
 
-type Action =
+export type Action =
   | { type: 'start' }
   | { type: 'pause'; nodeId: string; created: boolean }
   | { type: 'resume' }
   | { type: 'finish'; prev: SessionState };
+
+/** 检查点：会话 + 撤销历史 + 段计数（D22 完整恢复） */
+export interface Checkpoint {
+  session: SessionData;
+  actions: Action[];
+  segCounter: number;
+}
 
 let seq = 0;
 function newId(prefix: string): string {
@@ -90,7 +97,7 @@ export class RecorderState {
   }
 
   /** 检查点：会话 + 撤销历史 + 段计数（D22：崩溃后完整恢复，含撤销能力） */
-  checkpoint(): { session: SessionData; actions: Action[]; segCounter: number } {
+  checkpoint(): Checkpoint {
     return {
       session: this.snapshot,
       actions: structuredClone(this.actions),
@@ -98,11 +105,7 @@ export class RecorderState {
     };
   }
 
-  static restore(ck: {
-    session: SessionData;
-    actions?: Action[];
-    segCounter?: number;
-  }): RecorderState {
+  static restore(ck: Checkpoint): RecorderState {
     const r = new RecorderState(ck.session);
     r.actions = structuredClone(ck.actions ?? []);
     r.segCounter = ck.segCounter ?? 0;
