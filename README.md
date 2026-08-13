@@ -15,6 +15,10 @@ npm run dev     # 本地开发服务器
 npm run build   # 类型检查 + 构建
 ```
 
+## 许可证
+
+[Apache-2.0](./LICENSE)（个人项目，欢迎 fork 与改进）。
+
 ## 更新记录
 
 - M5（2026-08-04）：`M5_规格.md`；**视觉精修**（D21 落地：页面边缘虚化低透明的礼花/炮仗 SVG 装饰、暖色基调强化、z-index 分层）；**PWA 离线**（manifest + Service Worker 运行时缓存 + 程序化生成的灯笼图标 192/512/apple-touch；SW 仅生产注册）；部署工作流已就绪。
