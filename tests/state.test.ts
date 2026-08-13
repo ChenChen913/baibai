@@ -233,15 +233,24 @@ describe('跳变防护（D22 最小版）', () => {
 });
 
 describe('出行方式（D19 R1）', () => {
-  it('骑车段访问记为 bike', () => {
+  it('骑车段访问记为 bike，到户自动回走路', () => {
     const r = started();
     r.setMode('bike', T0 + 500);
     r.pause(fixes(far(100)), T0 + 1000);
     expect(r.snapshot.visits[0].mode).toBe('bike');
+    expect(r.snapshot.currentMode).toBe('walk'); // D19：到户自动回走路
     r.resume(T0 + 2000);
-    r.setMode('walk', T0 + 2500); // 到下一户切回走路（UI 自动，这里手动模拟）
     r.pause(fixes(far(300)), T0 + 3000);
     expect(r.snapshot.visits[1].mode).toBe('walk');
+  });
+
+  it('撤销暂停时还原出行方式', () => {
+    const r = started();
+    r.setMode('bike', T0 + 500);
+    r.pause(fixes(far(100)), T0 + 1000);
+    expect(r.snapshot.currentMode).toBe('walk');
+    r.undo();
+    expect(r.snapshot.currentMode).toBe('bike'); // 回到"仍在骑行前往"的状态
   });
 });
 

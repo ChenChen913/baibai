@@ -51,7 +51,7 @@ export const JUMP_DT_MS = 2000;
 
 export type Action =
   | { type: 'start' }
-  | { type: 'pause'; nodeId: string; created: boolean }
+  | { type: 'pause'; nodeId: string; created: boolean; mode: Mode }
   | { type: 'resume' }
   | { type: 'finish'; prev: SessionState };
 
@@ -173,7 +173,13 @@ export class RecorderState {
       mode: this.s.currentMode,
     });
     this.s.state = 'PAUSED';
-    this.actions.push({ type: 'pause', nodeId, created });
+    this.actions.push({
+      type: 'pause',
+      nodeId,
+      created,
+      mode: this.s.currentMode,
+    });
+    this.s.currentMode = 'walk'; // D19：到下一户自动回走路
     this.touch(now);
     return node;
   }
@@ -270,6 +276,7 @@ export class RecorderState {
           const i = this.s.nodes.findIndex((x) => x.id === a.nodeId);
           if (i >= 0) this.s.nodes.splice(i, 1);
         }
+        this.s.currentMode = a.mode; // 还原暂停前的出行方式
         this.s.state = 'WALKING';
         break;
       }

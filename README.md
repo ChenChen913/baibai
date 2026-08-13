@@ -17,5 +17,6 @@ npm run build   # 类型检查 + 构建
 
 ## 更新记录
 
+- M2 · 第 1 步（2026-08-04）：`M2_规格.md`；算法层 `smooth.ts`（跳变切段 / 段内滑动平均（跳过 jump 点）/ 平滑管线 / Douglas-Peucker 抽稀）、`track.ts`（会话→边序列分段（含中途回 Home 多段循环、D19 方式归属）/ SVG 等比投影与 path）；测试增至 **56 项全绿**；修复 D19 实现缺口（到户自动回走路 + 撤销还原方式）；vite 增加 tmpdir 监听忽略防 EBUSY。
 - M1 · 第 2 步（2026-08-04）：实现 `db.ts`（IndexedDB：活跃检查点/历史会话/全量导出）、`gps.ts`（watchPosition 采样 + 最近 fix 环形缓冲）、`ui.ts` + `style.css`（暖色基础界面：状态大字/大按钮/出行方式切换/toast）、`main.ts`（全流程接线：检查点 10s 落盘、崩溃恢复续录、震动、Wake Lock、JSON 导出）；测试增至 **35 项全绿**，生产构建通过。
 - M1 · 第 1 步（2026-08-04）：工程脚手架（Vite + TypeScript strict + vitest）；算法层 `geo.ts`（haversine / 分量中位数 / 最近节点）、`state.ts`（会话状态机：开始/暂停/继续/撤销/结束、10m 节点合并、自动编号、跳变防护、检查点与恢复）及对应单元测试。
