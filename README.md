@@ -6,16 +6,40 @@
 
 - 📄 [项目需求文档](./项目需求文档.md)（22 项决策共识）
 - 📄 [拷问决策记录](./拷问决策记录.md)（决策树档案）
-- 📄 [M1 规格](./M1_规格.md)
+- 📄 规格文档：[M1](./M1_规格.md) · [M2](./M2_规格.md) · [M3](./M3_规格.md) · [M4](./M4_规格.md) · [M5](./M5_规格.md)
 
-## 开发
+## 技术栈
+
+| 层 | 选型 |
+|---|---|
+| 语言/构建 | TypeScript（严格模式）+ Vite；**无框架、零运行时依赖** |
+| 测试 | vitest（102 项单测）+ fake-indexeddb |
+| 定位 | 浏览器 Geolocation API（手机自带 GPS/北斗；无高精度差分设备） |
+| 存储 | IndexedDB（活跃检查点 / 历史会话 / 今年清单）+ JSON 全量导入导出 |
+| 可视化 | **自绘 SVG + CSS 动画**（无第三方地图库；OSM 地图为可选增强，暂未启用） |
+| 离线 | 手写 Service Worker（运行时缓存）+ Web App Manifest + 程序化生成的灯笼图标 |
+| 算法 | haversine 球面距离 · 分量中位数 · 滑动平均 + Douglas-Peucker 抽稀 · **Held-Karp 精确解 TSP**（n≤16，超出用贪心+2-opt）· 弧长重采样/折线插值 |
+
+## 运行与启动
+
+环境要求：**Node.js ≥ 20**（仅本地开发/构建需要；线上访问零依赖，手机直接打开即可）。
 
 ```powershell
-npm install
-npm test        # vitest 单元测试
-npm run dev     # 本地开发服务器
-npm run build   # 类型检查 + 构建
+npm install      # 安装开发依赖
+npm run dev      # 本地开发服务器 → http://localhost:5173
+npm run build    # 类型检查 + 生产构建（输出 dist/）
+npm run preview  # 本地生产预览 → http://localhost:4173
+npm test         # vitest 单元测试（102 项）
 ```
+
+线上访问：**https://chenchen913.github.io/baibai/**（电脑/手机浏览器均可，纯前端，无后端）。
+
+## 部署（GitHub Pages）
+
+- **推送即发布**：push 到 `main` 分支自动触发 `.github/workflows/pages.yml` → `npm ci` → `npm test` → `npm run build` → 上传构建产物 → 部署 Pages；
+- Pages 源为 **GitHub Actions（workflow）模式**，无需手动设置；部署地址即仓库 Pages 地址；
+- 仓库：`ChenChen913/baibai`（公开，Apache-2.0）；
+- 备注：本仓库已配置 git 代理（`http.proxy = 127.0.0.1:10810`，国内网络推送需要；`git push` 可直接使用）。
 
 ## 许可证
 
