@@ -5,6 +5,7 @@ import { buildPlan } from './playback.js';
 import { optimizeSession, scorecard, type Route } from './optimize.js';
 import { projectToView } from './track.js';
 import { lerpPolyline, resamplePolyline, routePolyline, type XY } from './polyline.js';
+import { ICONS } from './icons.js';
 
 const W = 480;
 const H = 560;
@@ -13,10 +14,10 @@ const MORPH_MS = 3000;
 
 type Tab = 'walk_time' | 'walk_dist' | 'fly';
 
-const TAB_META: Record<Tab, { label: string; color: string }> = {
-  walk_time: { label: '🚶 走路时间最优', color: '#c8402f' },
-  walk_dist: { label: '📏 走路距离最优', color: '#e8a23d' },
-  fly: { label: '✈️ 飞行最优', color: '#c9971c' },
+const TAB_META: Record<Tab, { label: string; color: string; icon: string }> = {
+  walk_time: { label: '走路时间最优', color: '#c8402f', icon: ICONS.walk },
+  walk_dist: { label: '走路距离最优', color: '#e8a23d', icon: ICONS.ruler },
+  fly: { label: '飞行最优', color: '#c9971c', icon: ICONS.plane },
 };
 
 const fmtKm = (m: number): string => `${(m / 1000).toFixed(2)} km`;
@@ -53,20 +54,20 @@ export function mountOptimizeView(
         <svg id="opt-svg" viewBox="0 0 ${W} ${H}"></svg>
       </div>
       <div class="pctrl">
-        <button id="opt-tab-time" class="secondary small">${TAB_META.walk_time.label}</button>
-        <button id="opt-tab-dist" class="secondary small">${TAB_META.walk_dist.label}</button>
-        <button id="opt-tab-fly" class="secondary small">${TAB_META.fly.label}</button>
+        <button id="opt-tab-time" class="secondary small">${TAB_META.walk_time.icon}${TAB_META.walk_time.label}</button>
+        <button id="opt-tab-dist" class="secondary small">${TAB_META.walk_dist.icon}${TAB_META.walk_dist.label}</button>
+        <button id="opt-tab-fly" class="secondary small">${TAB_META.fly.icon}${TAB_META.fly.label}</button>
       </div>
       <div class="pctrl">
-        <button id="opt-reveal" class="small">▶ 推演</button>
-        <button id="opt-morph" class="small">✨ 压轴动画</button>
+        <button id="opt-reveal" class="small">${ICONS.play}推演</button>
+        <button id="opt-morph" class="small">${ICONS.star}压轴动画</button>
         <button id="opt-reset" class="secondary small">重置</button>
       </div>
       <p class="hint" id="opt-hint"></p>
     </div>
   `;
 
-  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>(id)!;
+  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>('#' + id)!;
   const svg = $('opt-svg');
 
   const route = (): Route => routes.find((r) => r.mode === tab)!;

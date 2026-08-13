@@ -28,27 +28,43 @@ body {
 
 .decor-item {
   position: absolute;
-  opacity: 0.16;
-  filter: blur(1.5px);
+  opacity: 0.2;
+  filter: blur(1px);
 }
 
 .decor-firework {
-  width: 150px;
-  top: -30px;
-  left: -30px;
+  width: 170px;
+  top: -24px;
+  left: -24px;
 }
 
 .decor-firework2 {
-  width: 110px;
-  bottom: -20px;
-  right: -20px;
+  width: 120px;
+  bottom: -16px;
+  right: -16px;
   transform: rotate(160deg);
 }
 
 .decor-cracker {
-  width: 60px;
-  bottom: 8vh;
-  left: 6px;
+  width: 64px;
+  bottom: 10vh;
+  left: 8px;
+}
+
+/* SVG 线性图标 */
+.icon {
+  width: 17px;
+  height: 17px;
+  display: inline-block;
+  vertical-align: -3px;
+  margin-right: 6px;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
 }
 
 .wrap {

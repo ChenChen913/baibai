@@ -5,6 +5,7 @@ import { buildEdges, projectToView } from './track.js';
 import { buildPlan, fractionAt, positionAt, type PlaybackPlan } from './playback.js';
 import { mergeNodes, removePoint, renameNode, splitVisit } from './review.js';
 import { matchPlan, nameCandidates, type Plan } from './plan.js';
+import { ICONS } from './icons.js';
 
 export interface ReviewDeps {
   onBack(): void;
@@ -57,7 +58,7 @@ export function mountReviewView(
       <div class="bar">
         <button id="rv-back" class="secondary small">← 返回</button>
         <div class="bar-title" id="rv-title"></div>
-        <button id="rv-opt" class="small" style="margin-left:auto">三线对比 ✨</button>
+        <button id="rv-opt" class="small" style="margin-left:auto">${ICONS.star}三线对比</button>
       </div>
       <div class="stat-line" id="rv-stats"></div>
       <div class="canvas-box">
@@ -91,7 +92,7 @@ export function mountReviewView(
     </div>
   `;
 
-  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>(id)!;
+  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>('#' + id)!;
 
   function stopAnim(): void {
     playing = false;

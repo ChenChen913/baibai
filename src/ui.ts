@@ -1,6 +1,7 @@
 /** M1 界面：状态大字 + 大按钮 + 出行方式切换（暖色基础版，视觉精修在 M5） */
 
 import type { Mode, SessionData } from './state.js';
+import { ICONS } from './icons.js';
 
 export interface UiCallbacks {
   onStart(): void;
@@ -50,16 +51,16 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
         <button id="btn-export" class="secondary">导出数据</button>
       </div>
       <div class="toolbar">
-        <button id="btn-walk" class="secondary">🚶 走路</button>
-        <button id="btn-bike" class="secondary">🚲 骑车</button>
-        <button id="btn-plan" class="secondary">📋 清单</button>
-        <button id="btn-history" class="secondary">📜 历史</button>
+        <button id="btn-walk" class="secondary">${ICONS.walk}<span>走路</span></button>
+        <button id="btn-bike" class="secondary">${ICONS.bike}<span>骑车</span></button>
+        <button id="btn-plan" class="secondary">${ICONS.plan}<span>清单</span></button>
+        <button id="btn-history" class="secondary">${ICONS.history}<span>历史</span></button>
       </div>
     </div>
     <div id="toast"></div>
   `;
 
-  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>(id)!;
+  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>('#' + id)!;
   $('btn-start').addEventListener('click', () => cb.onStart());
   $('btn-pause').addEventListener('click', () => cb.onPause());
   $('btn-resume').addEventListener('click', () => cb.onResume());
@@ -93,6 +94,10 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     $('btn-finish').style.display = st === 'WALKING' || st === 'PAUSED' ? '' : 'none';
     $('btn-undo').style.display = st === 'WALKING' || st === 'PAUSED' ? '' : 'none';
     $('btn-export').style.display = st === 'IDLE' || st === 'FINISHED' ? '' : 'none';
+    // 出行方式：仅记录中（WALKING/PAUSED）可切换；IDLE/FINISHED 禁用（灰显）
+    const canMode = !!s && (st === 'WALKING' || st === 'PAUSED');
+    ($('btn-walk') as HTMLButtonElement).disabled = !canMode;
+    ($('btn-bike') as HTMLButtonElement).disabled = !canMode;
     $('btn-walk').classList.toggle('active', (s?.currentMode ?? 'walk') === 'walk');
     $('btn-bike').classList.toggle('active', s?.currentMode === 'bike');
   }

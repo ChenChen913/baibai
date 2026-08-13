@@ -104,8 +104,10 @@ function mountRecord(): Ui {
       complete();
     },
     onMode(m) {
-      recorder?.setMode(m, now());
+      if (!recorder) return;
+      recorder.setMode(m, now());
       flush();
+      ui.toast(m === 'bike' ? '下一段将骑行前往，到户自动回走路' : '已切回步行');
     },
     onExport() {
       void doExport();

@@ -1,0 +1,142 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mountUi } from '../src/ui.js';
+import { mountPlanView } from '../src/plan-ui.js';
+import { mountReviewView } from '../src/review-ui.js';
+import { mountOptimizeView } from '../src/optimize-ui.js';
+import { generateDemoSession } from '../src/demo.js';
+
+function makeRoot(): HTMLElement {
+  document.body.innerHTML = '<div id="app"></div>';
+  return document.querySelector<HTMLElement>('#app')!;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全按钮失灵）', () => {
+  it('挂载后每个按钮点击都触发对应回调', () => {
+    const cb = {
+      onStart: vi.fn(),
+      onPause: vi.fn(),
+      onResume: vi.fn(),
+      onUndo: vi.fn(),
+      onFinish: vi.fn(),
+      onMode: vi.fn(),
+      onExport: vi.fn(),
+      onHistory: vi.fn(),
+      onPlan: vi.fn(),
+    };
+    const ui = mountUi(makeRoot(), cb);
+    const click = (id: string) => {
+      const el = document.querySelector<HTMLButtonElement>(`#${id}`);
+      expect(el, `按钮 #${id} 应存在`).toBeTruthy();
+      el!.click();
+    };
+    click('btn-start');
+    expect(cb.onStart).toHaveBeenCalledTimes(1);
+    click('btn-pause');
+    expect(cb.onPause).toHaveBeenCalledTimes(1);
+    click('btn-resume');
+    expect(cb.onResume).toHaveBeenCalledTimes(1);
+    click('btn-undo');
+    expect(cb.onUndo).toHaveBeenCalledTimes(1);
+    click('btn-finish');
+    expect(cb.onFinish).toHaveBeenCalledTimes(1);
+    click('btn-export');
+    expect(cb.onExport).toHaveBeenCalledTimes(1);
+    click('btn-walk');
+    expect(cb.onMode).toHaveBeenCalledWith('walk');
+    click('btn-bike');
+    expect(cb.onMode).toHaveBeenCalledWith('bike');
+    click('btn-plan');
+    expect(cb.onPlan).toHaveBeenCalledTimes(1);
+    click('btn-history');
+    expect(cb.onHistory).toHaveBeenCalledTimes(1);
+    ui.render(null, 0);
+  });
+
+  it('无会话时走路/骑车禁用；记录中可用；结束后禁用', () => {
+    const ui = mountUi(makeRoot(), {
+      onStart: () => {},
+      onPause: () => {},
+      onResume: () => {},
+      onUndo: () => {},
+      onFinish: () => {},
+      onMode: () => {},
+      onExport: () => {},
+      onHistory: () => {},
+      onPlan: () => {},
+    });
+    const walk = () => document.querySelector<HTMLButtonElement>('#btn-walk')!;
+    const bike = () => document.querySelector<HTMLButtonElement>('#btn-bike')!;
+
+    ui.render(null, 0);
+    expect(walk().disabled).toBe(true);
+    expect(bike().disabled).toBe(true);
+
+    const snap = generateDemoSession();
+    ui.render({ ...snap, state: 'WALKING' }, 0);
+    expect(walk().disabled).toBe(false);
+    expect(bike().disabled).toBe(false);
+
+    ui.render({ ...snap, state: 'FINISHED' }, 0);
+    expect(walk().disabled).toBe(true);
+    expect(bike().disabled).toBe(true);
+  });
+});
+
+describe('各视图挂载不抛错且关键按钮可用', () => {
+  it('清单视图：返回 / 添加', async () => {
+    const deps = {
+      onBack: vi.fn(),
+      loadPlan: vi.fn(async () => undefined),
+      savePlan: vi.fn(async () => {}),
+      listSessions: vi.fn(async () => []),
+    };
+    mountPlanView(makeRoot(), 2027, deps);
+    document.querySelector<HTMLElement>('#pl-back')!.click();
+    expect(deps.onBack).toHaveBeenCalledTimes(1);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('张叔家');
+    document.querySelector<HTMLElement>('#pl-add')!.click();
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+  });
+
+  it('回顾视图：三线对比入口与返回', () => {
+    const deps = {
+      onBack: vi.fn(),
+      onSave: vi.fn(),
+      onOptimize: vi.fn(),
+      loadPlan: vi.fn(async () => undefined),
+      loadPrev: vi.fn(async () => undefined),
+    };
+    mountReviewView(makeRoot(), generateDemoSession(), deps);
+    document.querySelector<HTMLElement>('#rv-opt')!.click();
+    expect(deps.onOptimize).toHaveBeenCalledTimes(1);
+    document.querySelector<HTMLElement>('#rv-back')!.click();
+    expect(deps.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('三线对比视图：切标签与推演不抛错', () => {
+    let rafCb: FrameRequestCallback | null = null;
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      rafCb = cb;
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      rafCb = null;
+    });
+    const deps = { onBack: vi.fn() };
+    mountOptimizeView(makeRoot(), generateDemoSession(), deps);
+    document.querySelector<HTMLElement>('#opt-tab-fly')!.click();
+    document.querySelector<HTMLElement>('#opt-tab-time')!.click();
+    document.querySelector<HTMLElement>('#opt-reveal')!.click(); // 推演启动，不抛错
+    expect(rafCb).not.toBeNull();
+    document.querySelector<HTMLElement>('#opt-morph')!.click(); // 压轴启动，不抛错
+    document.querySelector<HTMLElement>('#opt-back')!.click();
+    expect(deps.onBack).toHaveBeenCalledTimes(1);
+  });
+});

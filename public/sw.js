@@ -1,5 +1,6 @@
 /* 拜拜 Service Worker：运行时缓存（首次在线访问全量入缓存，之后断网可跑） */
-const CACHE = 'baibai-v1';
+/* 发布新版本时递增版本号，旧缓存会被 activate 清掉 */
+const CACHE = 'baibai-v2';
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./'])));

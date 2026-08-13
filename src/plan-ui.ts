@@ -37,7 +37,7 @@ export function mountPlanView(root: HTMLElement, year: number, deps: PlanDeps): 
     </div>
   `;
 
-  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>(id)!;
+  const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>('#' + id)!;
 
   function persist(): void {
     plan.updatedAt = Date.now();
