@@ -6,14 +6,18 @@ import { GpsTracker } from './gps.js';
 import { mountUi, type Ui } from './ui.js';
 import { mountReviewView } from './review-ui.js';
 import { mountOptimizeView } from './optimize-ui.js';
+import { mountPlanView } from './plan-ui.js';
 import { generateDemoSession } from './demo.js';
+import { scorecard, optimizeSession } from './optimize.js';
 import type { SessionData } from './state.js';
 import {
   clearActive,
   exportAllJson,
   listSessions,
   loadActive,
+  loadPlan,
   saveActive,
+  savePlan,
   saveSession,
 } from './db.js';
 import type { Fix } from './geo.js';
@@ -23,7 +27,7 @@ const gps = new GpsTracker();
 let recorder: RecorderState | null = null;
 let pendingStart = false;
 let wakeLock: { release: () => Promise<void> } | null = null;
-let view: 'record' | 'history' | 'review' | 'optimize' = 'record';
+let view: 'record' | 'history' | 'review' | 'optimize' | 'plan' = 'record';
 
 const now = (): number => Date.now();
 const vibrate = (): void => {
@@ -109,6 +113,9 @@ function mountRecord(): Ui {
     onHistory() {
       void showHistory();
     },
+    onPlan() {
+      showPlanView();
+    },
   });
 }
 
@@ -193,6 +200,26 @@ function showReview(sess: SessionData): void {
         onBack: () => showReview(s2),
       });
     },
+    loadPlan: (year) => loadPlan(year),
+    loadPrev: async (year) => {
+      const sessions = (await listSessions()).sort(
+        (a, b) => b.createdAt - a.createdAt,
+      );
+      return sessions.find((x) => x.year < year);
+    },
+  });
+}
+
+function showPlanView(): void {
+  view = 'plan';
+  mountPlanView(app, new Date().getFullYear(), {
+    onBack: () => {
+      view = 'record';
+      ui = mountRecord();
+    },
+    loadPlan: (year) => loadPlan(year),
+    savePlan: (p) => savePlan(p),
+    listSessions: () => listSessions(),
   });
 }
 
@@ -219,10 +246,16 @@ async function showHistory(): Promise<void> {
     sessions.length === 0
       ? '<p class="empty">还没有记录。大年初一，出发！</p>'
       : sessions
-          .map(
-            (s) =>
-              `<button class="history-item" data-id="${s.id}">📅 ${s.date} · ${s.nodes.length} 户 · ${s.visits.length} 次到访</button>`,
-          )
+          .map((s) => {
+            let stat: string;
+            try {
+              const c = scorecard(s, optimizeSession(s));
+              stat = `${s.nodes.length} 户 · ${(c.actualDistM / 1000).toFixed(2)} km · 绕路率 ${c.savingsTimePct.toFixed(0)}%`;
+            } catch {
+              stat = `${s.nodes.length} 户`;
+            }
+            return `<button class="history-item" data-id="${s.id}">📅 ${s.date} · ${stat}</button>`;
+          })
           .join('');
   list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {
     b.addEventListener('click', () => {

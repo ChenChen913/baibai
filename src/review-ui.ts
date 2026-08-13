@@ -4,11 +4,14 @@ import type { SessionData } from './state.js';
 import { buildEdges, projectToView } from './track.js';
 import { buildPlan, fractionAt, positionAt, type PlaybackPlan } from './playback.js';
 import { mergeNodes, removePoint, renameNode, splitVisit } from './review.js';
+import { matchPlan, nameCandidates, type Plan } from './plan.js';
 
 export interface ReviewDeps {
   onBack(): void;
   onSave(s: SessionData): void;
   onOptimize(s: SessionData): void;
+  loadPlan(year: number): Promise<Plan | undefined>;
+  loadPrev(year: number): Promise<SessionData | undefined>;
 }
 
 const W = 480;
@@ -46,6 +49,8 @@ export function mountReviewView(
   let baseMs = 0;
   let animStart = 0;
   let raf = 0;
+  let plan: Plan | undefined;
+  let prevSession: SessionData | undefined;
 
   root.innerHTML = `
     <div class="wrap">
@@ -78,6 +83,10 @@ export function mountReviewView(
         </div>
         <h2>异常跳变点</h2>
         <div id="rv-jumps"></div>
+        <h2>漏访检查（今年清单）</h2>
+        <div id="rv-plan"></div>
+        <h2>套用去年的户名</h2>
+        <div id="rv-names"></div>
       </div>
     </div>
   `;
@@ -106,6 +115,8 @@ export function mountReviewView(
     renderNodes();
     renderMerge();
     renderJumps();
+    renderPlanSection();
+    renderNameSection();
     renderProgress();
   }
 
@@ -236,6 +247,68 @@ export function mountReviewView(
     });
   }
 
+  /** 漏访检查（F-9）：清单 vs 实际节点 */
+  function renderPlanSection(): void {
+    const box = $('rv-plan');
+    if (!plan) {
+      box.innerHTML =
+        '<p class="empty">今年还没有清单。回记录页 →「📋 清单」先导入/添加。</p>';
+      return;
+    }
+    if (plan.items.length === 0) {
+      box.innerHTML = '<p class="empty">今年清单是空的。</p>';
+      return;
+    }
+    const r = matchPlan(s, plan);
+    if (r.missing.length === 0) {
+      box.innerHTML = `<p>✅ 清单 ${plan.items.length} 户全部到访，没有漏拜！</p>`;
+      return;
+    }
+    box.innerHTML =
+      `<p class="missing">⚠️ 疑似漏访 ${r.missing.length} 户：</p>` +
+      r.missing
+        .map(
+          (it) =>
+            `<div class="jump-row"><span class="missing">❌ ${esc(it.name || '(未命名)')} 没去！</span>${it.pos ? '' : '<span class="visits">无位置·手动核对</span>'}</div>`,
+        )
+        .join('');
+  }
+
+  /** 套名继承（D17）：逐个节点弹去年候选，点击即套用 */
+  function renderNameSection(): void {
+    const box = $('rv-names');
+    if (!prevSession || prevSession.nodes.length === 0) {
+      box.innerHTML = '<p class="empty">没有往年记录可套用。</p>';
+      return;
+    }
+    box.innerHTML =
+      `<p class="hint">点击候选名立即套用到该户（按距离排序，取前 3）：</p>` +
+      s.nodes
+        .map((n) => {
+          const cands = nameCandidates(n.pos, prevSession!.nodes, 3);
+          const label = n.name || `户${n.autoNo}`;
+          if (cands.length === 0) {
+            return `<div class="jump-row"><span class="nlabel">${esc(label)}</span><span class="visits">无候选</span></div>`;
+          }
+          return (
+            `<div class="jump-row"><span class="nlabel">${esc(label)}</span>` +
+            cands
+              .map(
+                (c, k) =>
+                  `<button data-apply="${n.id}" data-name="${esc(c.name)}" class="chip">${esc(c.name)}（${Math.round(c.distM)}m）</button>`,
+              )
+              .join('') +
+            `</div>`
+          );
+        })
+        .join('');
+    box.querySelectorAll<HTMLElement>('[data-apply]').forEach((b) => {
+      b.addEventListener('click', () => {
+        mutate(renameNode(s, b.dataset.apply!, b.dataset.name!));
+      });
+    });
+  }
+
   function renderProgress(): void {
     $('rv-progress').textContent = `${fmtDur(baseMs)} / ${fmtDur(pl.totalMs)} · ${speed}x`;
   }
@@ -314,4 +387,14 @@ export function mountReviewView(
   }
 
   refresh();
+
+  // 异步加载今年清单与往年记录（漏访/套名依赖）
+  void deps.loadPlan(s.year).then((p) => {
+    plan = p;
+    renderPlanSection();
+  });
+  void deps.loadPrev(s.year).then((p) => {
+    prevSession = p;
+    renderNameSection();
+  });
 }

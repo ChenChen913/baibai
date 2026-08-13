@@ -1,11 +1,13 @@
-/** IndexedDB 持久化：活跃检查点 + 历史会话 + 全量导出（D2/D22） */
+/** IndexedDB 持久化：活跃检查点 + 历史会话 + 今年清单 + 全量导出（D2/D22/M4） */
 
 import type { Checkpoint, SessionData } from './state.js';
+import type { Plan } from './plan.js';
 
 const DB_NAME = 'baibai';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_ACTIVE = 'active';
 const STORE_SESSIONS = 'sessions';
+const STORE_PLANS = 'plans';
 const ACTIVE_KEY = 'current';
 
 function openDb(): Promise<IDBDatabase> {
@@ -18,6 +20,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_SESSIONS)) {
         db.createObjectStore(STORE_SESSIONS, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_PLANS)) {
+        db.createObjectStore(STORE_PLANS, { keyPath: 'year' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -91,6 +96,43 @@ export async function clearSessions(): Promise<void> {
   const db = await openDb();
   try {
     await reqToPromise(store(db, STORE_SESSIONS, 'readwrite').clear());
+  } finally {
+    db.close();
+  }
+}
+
+/** 今年清单（M4） */
+export async function savePlan(p: Plan): Promise<void> {
+  const db = await openDb();
+  try {
+    await reqToPromise(store(db, STORE_PLANS, 'readwrite').put(p));
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadPlan(year: number): Promise<Plan | undefined> {
+  const db = await openDb();
+  try {
+    return await reqToPromise(store(db, STORE_PLANS, 'readonly').get(year));
+  } finally {
+    db.close();
+  }
+}
+
+export async function clearPlan(year: number): Promise<void> {
+  const db = await openDb();
+  try {
+    await reqToPromise(store(db, STORE_PLANS, 'readwrite').delete(year));
+  } finally {
+    db.close();
+  }
+}
+
+export async function listPlans(): Promise<Plan[]> {
+  const db = await openDb();
+  try {
+    return await reqToPromise(store(db, STORE_PLANS, 'readonly').getAll());
   } finally {
     db.close();
   }
