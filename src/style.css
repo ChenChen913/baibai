@@ -494,6 +494,29 @@ button.small {
   flex-wrap: wrap;
 }
 
+/* 合并：点选芯片 */
+.merge-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.merge-chip {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.merge-chip.selected {
+  background: linear-gradient(135deg, var(--accent), #d86a3c);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(200, 64, 47, 0.25);
+}
+
 select {
   padding: 8px 10px;
   border-radius: 10px;

@@ -76,11 +76,10 @@ export function mountReviewView(
         <h2>户名与收拾</h2>
         <div id="rv-nodes"></div>
         <h2>合并两户（误拆并为一户时）</h2>
-        <div class="merge-row">
-          <select id="rv-m-keep"></select>
-          <span>＋</span>
-          <select id="rv-m-drop"></select>
-          <button id="rv-merge" class="small">合并</button>
+        <div id="rv-merge">
+          <p class="hint" id="rv-merge-hint">点选两户：第一个保留，第二个并入</p>
+          <div class="merge-chips" id="rv-merge-chips"></div>
+          <button id="rv-merge-btn" class="small" disabled>合并所选两户</button>
         </div>
         <h2>异常跳变点</h2>
         <div id="rv-jumps"></div>
@@ -197,24 +196,57 @@ export function mountReviewView(
   }
 
   function renderMerge(): void {
-    const keep = $('rv-m-keep') as HTMLSelectElement;
-    const drop = $('rv-m-drop') as HTMLSelectElement;
-    const label = (n: { id: string; name: string; autoNo: number }) =>
-      `${n.name || `户${n.autoNo}`}`;
-    keep.innerHTML = s.nodes
-      .map((n) => `<option value="${n.id}">${esc(label(n))}</option>`)
+    const box = $('rv-merge-chips');
+    const btn = $('rv-merge-btn') as HTMLButtonElement;
+    const hint = $('rv-merge-hint');
+    const labelOf = (id: string): string => {
+      const n = s.nodes.find((x) => x.id === id);
+      return n ? n.name || `户${n.autoNo}` : id;
+    };
+    if (s.nodes.length < 2) {
+      box.innerHTML = '<p class="empty">至少需要两户才能合并</p>';
+      btn.disabled = true;
+      hint.textContent = '点选两户：第一个保留，第二个并入';
+      return;
+    }
+    box.innerHTML = s.nodes
+      .map(
+        (n) =>
+          `<button class="chip merge-chip" data-mid="${n.id}">${esc(labelOf(n.id))}</button>`,
+      )
       .join('');
-    drop.innerHTML = s.nodes
-      .map((n) => `<option value="${n.id}">${esc(label(n))}</option>`)
-      .join('');
-    $('rv-merge').addEventListener('click', () => {
-      if (s.nodes.length < 2) return;
-      if (keep.value === drop.value) {
-        window.alert('请选择两个不同的户');
-        return;
-      }
-      mutate(mergeNodes(s, keep.value, drop.value));
+    const selected: string[] = [];
+    const sync = (): void => {
+      box.querySelectorAll<HTMLElement>('[data-mid]').forEach((x) => {
+        x.classList.toggle('selected', selected.includes(x.dataset.mid!));
+      });
+      btn.disabled = selected.length !== 2;
+      hint.textContent =
+        selected.length === 0
+          ? '点选两户：第一个保留，第二个并入'
+          : selected.length === 1
+            ? `已选「${labelOf(selected[0])}」· 再选一户`
+            : `将把「${labelOf(selected[1])}」并入「${labelOf(selected[0])}」（名字/编号保留前者）`;
+    };
+    box.querySelectorAll<HTMLElement>('[data-mid]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.mid!;
+        const idx = selected.indexOf(id);
+        if (idx >= 0) {
+          selected.splice(idx, 1);
+        } else {
+          if (selected.length >= 2) selected.shift(); // 最多两个，新的顶掉最早的
+          selected.push(id);
+        }
+        sync();
+      });
     });
+    btn.onclick = () => {
+      if (selected.length === 2) {
+        mutate(mergeNodes(s, selected[0], selected[1]));
+      }
+    };
+    sync();
   }
 
   function renderJumps(): void {

@@ -3,7 +3,7 @@
 import './style.css';
 import 'leaflet/dist/leaflet.css';
 import { RecorderState } from './state.js';
-import { GpsTracker } from './gps.js';
+import { GpsTracker, type GpsErrorKind } from './gps.js';
 import { mountUi, type Ui } from './ui.js';
 import { mountMap, type MapController } from './map-ui.js';
 import { mountReviewView } from './review-ui.js';
@@ -36,6 +36,23 @@ const now = (): number => Date.now();
 const vibrate = (): void => {
   navigator.vibrate?.(50);
 };
+
+let gpsWatchdog: number | undefined;
+
+/** 定位错误 → 用户能看懂的中文提示（之前静默吞掉是"手机无法定位"的元凶之一） */
+function handleGpsError(kind: GpsErrorKind): void {
+  if (view !== 'record') return;
+  const tips: Record<GpsErrorKind, string> = {
+    unsupported: '此浏览器不支持定位，请换系统浏览器（如 Safari / Chrome）打开',
+    denied:
+      '定位权限被拒绝：请点浏览器地址栏旁的锁形图标 → 允许定位，然后重新按「开始拜年」',
+    unavailable:
+      '无法获取定位：请确认系统定位服务已开启、人在开阔处；室内可能搜不到卫星',
+    timeout:
+      '定位超时：请到室外开阔处重试；若在微信内打开，请改用系统浏览器（微信内置浏览器常拦截定位）',
+  };
+  ui.toast(tips[kind]);
+}
 
 /** 把当前会话状态同步到地图（轨迹/节点/Home/当前位置） */
 function syncMap(): void {
@@ -72,9 +89,18 @@ function mountRecord(): Ui {
       if (recorder) return;
       pendingStart = true;
       try {
-        gps.start(onFix);
+        gps.start({ onFix, onError: handleGpsError });
         void requestWakeLock();
         ui.toast('正在获取定位…');
+        // 30 秒看门狗：还没拿到定位就给提示，绝不无声卡住
+        window.clearTimeout(gpsWatchdog);
+        gpsWatchdog = window.setTimeout(() => {
+          if (pendingStart && !recorder) {
+            ui.toast(
+              '还没拿到定位：请检查定位权限/是否在室内；如在微信内请改用系统浏览器打开',
+            );
+          }
+        }, 30000);
       } catch (e) {
         pendingStart = false;
         ui.toast(e instanceof Error ? e.message : '定位启动失败');
@@ -96,7 +122,7 @@ function mountRecord(): Ui {
       if (!recorder) return;
       recorder.resume(now());
       try {
-        gps.start(onFix); // 离开该户重新采样
+        gps.start({ onFix, onError: handleGpsError }); // 离开该户重新采样
       } catch (e) {
         ui.toast((e as Error).message);
       }
@@ -163,6 +189,7 @@ function onFix(f: Fix): void {
       return;
     }
     pendingStart = false;
+    window.clearTimeout(gpsWatchdog);
     vibrate();
     flush();
     syncMap();
@@ -172,7 +199,7 @@ function onFix(f: Fix): void {
   if (recorder) {
     try {
       recorder.addPoint(f.pos, f.acc, now());
-      if (view === 'record') mapCtrl?.follow(f.pos.lat, f.pos.lng);
+      if (view === 'record') mapCtrl?.follow(f.pos.lat, f.pos.lng, f.acc);
     } catch {
       /* 非 WALKING 状态，忽略 */
     }
@@ -308,7 +335,9 @@ async function boot(): Promise<void> {
       const resume = ui.confirm('检测到未完成的拜年记录，继续吗？（取消=放弃）');
       if (resume) {
         recorder = RecorderState.restore(ck);
-        if (recorder.state === 'WALKING') gps.start(onFix);
+        if (recorder.state === 'WALKING') {
+          gps.start({ onFix, onError: handleGpsError });
+        }
         syncMap();
         ui.toast('已恢复未完成的记录');
       } else {
@@ -322,7 +351,10 @@ async function boot(): Promise<void> {
 
 setInterval(() => {
   if (view === 'record') {
-    ui.render(recorder?.snapshot ?? null, elapsedMs());
+    ui.render(recorder?.snapshot ?? null, elapsedMs(), {
+      acc: gps.lastFix?.acc ?? null,
+      waiting: pendingStart,
+    });
   }
 }, 1000);
 setInterval(flush, 10_000); // D22：每 10s 检查点落盘

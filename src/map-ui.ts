@@ -3,8 +3,8 @@
 import L from 'leaflet';
 
 export interface MapController {
-  /** 跟随当前位置（含自车标记） */
-  follow(lat: number, lng: number): void;
+  /** 跟随当前位置（含自车标记与精度圈） */
+  follow(lat: number, lng: number, accM?: number): void;
   /** 整条轨迹线 */
   setTrack(pts: { lat: number; lng: number }[]): void;
   /** 户节点 + Home 标记 */
@@ -40,10 +40,11 @@ export function mountMap(
   const trackPts: L.LatLngExpression[] = [];
 
   let me: L.CircleMarker | null = null;
+  let accCircle: L.Circle | null = null;
   let homeMarker: L.Marker | null = null;
   let nodeLayer = L.layerGroup().addTo(map);
 
-  function follow(lat: number, lng: number): void {
+  function follow(lat: number, lng: number, accM?: number): void {
     if (!me) {
       me = L.circleMarker([lat, lng], {
         radius: 9,
@@ -54,6 +55,20 @@ export function mountMap(
       }).addTo(map);
     } else {
       me.setLatLng([lat, lng]);
+    }
+    if (accCircle) {
+      accCircle.remove();
+      accCircle = null;
+    }
+    if (accM && accM > 0) {
+      accCircle = L.circle([lat, lng], {
+        radius: accM,
+        color: '#c8402f',
+        weight: 1,
+        fillColor: '#c8402f',
+        fillOpacity: 0.07,
+        interactive: false,
+      }).addTo(map);
     }
     trackPts.push([lat, lng]);
     track.setLatLngs(trackPts);

@@ -120,6 +120,30 @@ describe('各视图挂载不抛错且关键按钮可用', () => {
     expect(deps.onBack).toHaveBeenCalledTimes(1);
   });
 
+  it('回顾视图：合并交互——点选两户后按钮可用并触发保存', () => {
+    const deps = {
+      onBack: vi.fn(),
+      onSave: vi.fn(),
+      onOptimize: vi.fn(),
+      loadPlan: vi.fn(async () => undefined),
+      loadPrev: vi.fn(async () => undefined),
+    };
+    mountReviewView(makeRoot(), generateDemoSession(), deps);
+    const chips = document.querySelectorAll<HTMLElement>('.merge-chip');
+    expect(chips.length).toBe(8); // demo 8 户
+    const btn = document.querySelector<HTMLButtonElement>('#rv-merge-btn')!;
+    expect(btn.disabled).toBe(true);
+    chips[0].click();
+    expect(btn.disabled).toBe(true); // 只选了一个
+    chips[1].click();
+    expect(btn.disabled).toBe(false);
+    expect(chips[0].classList.contains('selected')).toBe(true);
+    expect(chips[1].classList.contains('selected')).toBe(true);
+    btn.click();
+    expect(deps.onSave).toHaveBeenCalledTimes(1); // 合并触发保存
+    expect(document.querySelectorAll('.merge-chip').length).toBe(7); // 8 → 7 户
+  });
+
   it('三线对比视图：切标签与推演不抛错', () => {
     let rafCb: FrameRequestCallback | null = null;
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {

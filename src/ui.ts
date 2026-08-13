@@ -16,7 +16,11 @@ export interface UiCallbacks {
 }
 
 export interface Ui {
-  render(s: SessionData | null, elapsedMs: number): void;
+  render(
+    s: SessionData | null,
+    elapsedMs: number,
+    gpsInfo?: { acc: number | null; waiting: boolean },
+  ): void;
   toast(msg: string): void;
   confirm(msg: string): boolean;
 }
@@ -98,16 +102,28 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     toastTimer = window.setTimeout(() => t.classList.remove('show'), 2400);
   }
 
-  function render(s: SessionData | null, elapsedMs: number): void {
+  function render(
+    s: SessionData | null,
+    elapsedMs: number,
+    gpsInfo?: { acc: number | null; waiting: boolean },
+  ): void {
     const st = s?.state ?? 'IDLE';
     $('status').textContent = STATE_LABEL[st] ?? st;
-    $('meta').textContent = s
-      ? st === 'WALKING'
-        ? '正在记录轨迹，到一户按「暂停」'
-        : st === 'PAUSED'
-          ? '离开时按「继续出发」'
-          : '本次拜年已保存'
-      : '从家门口出发，按「开始拜年」';
+    const acc = gpsInfo?.acc ?? null;
+    if (s) {
+      $('meta').textContent =
+        st === 'WALKING' || st === 'PAUSED'
+          ? acc !== null
+            ? `已定位 · 精度约 ±${Math.round(acc)} 米${acc > 100 ? '（当前为网络粗略定位，手机 GPS 可达 ±3~10 米）' : ''}`
+            : '正在获取定位…'
+          : st === 'FINISHED'
+            ? '本次拜年已保存'
+            : '从家门口出发，按「开始拜年」';
+    } else {
+      $('meta').textContent = gpsInfo?.waiting
+        ? '正在获取定位，请允许浏览器定位权限…'
+        : '从家门口出发，按「开始拜年」';
+    }
     $('stat-count').textContent = String(s?.visits.length ?? 0);
     $('stat-time').textContent = fmt(elapsedMs);
     $('btn-start').style.display = st === 'IDLE' ? '' : 'none';
