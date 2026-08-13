@@ -7,17 +7,17 @@
 - 📄 [项目需求文档](./项目需求文档.md)（22 项决策共识）
 - 📄 [拷问决策记录](./拷问决策记录.md)（决策树档案）
 - 📄 规格文档：[M1](./M1_规格.md) · [M2](./M2_规格.md) · [M3](./M3_规格.md) · [M4](./M4_规格.md) · [M5](./M5_规格.md)
-- 📱 **Android 原生版迁移（规划中）**：[迁移 SPEC](./android/SPEC.md) · [数据格式契约](./android/数据格式.md) · [防杀与后台定位](./android/防杀与后台定位.md)
+- 📱 **Android 原生版迁移（规划中）**：[迁移 SPEC](./android/SPEC.md) · [数据格式契约](./android/数据格式.md) · [防杀与后台定位](./android/防杀与后台定位.md) · [开发环境与流程](./android/开发环境与流程.md)（**本地零安卓工具链**方案）
 
 ## 技术栈
 
 | 层 | 选型 |
 |---|---|
 | 语言/构建 | TypeScript（严格模式）+ Vite；**无框架、零运行时依赖** |
-| 测试 | vitest（102 项单测）+ fake-indexeddb |
+| 测试 | vitest（111 项单测）+ jsdom（UI 冒烟）+ fake-indexeddb |
 | 定位 | 浏览器 Geolocation API（手机自带 GPS/北斗；无高精度差分设备） |
 | 存储 | IndexedDB（活跃检查点 / 历史会话 / 今年清单）+ JSON 全量导入导出 |
-| 可视化 | **自绘 SVG + CSS 动画**（无第三方地图库；OSM 地图为可选增强，暂未启用） |
+| 可视化 | **Leaflet + OpenStreetMap 实时地图** + 自绘 SVG/CSS 动画 |
 | 离线 | 手写 Service Worker（运行时缓存）+ Web App Manifest + 程序化生成的灯笼图标 |
 | 算法 | haversine 球面距离 · 分量中位数 · 滑动平均 + Douglas-Peucker 抽稀 · **Held-Karp 精确解 TSP**（n≤16，超出用贪心+2-opt）· 弧长重采样/折线插值 |
 
@@ -30,7 +30,7 @@ npm install      # 安装开发依赖
 npm run dev      # 本地开发服务器 → http://localhost:5173
 npm run build    # 类型检查 + 生产构建（输出 dist/）
 npm run preview  # 本地生产预览 → http://localhost:4173
-npm test         # vitest 单元测试（102 项）
+npm test         # vitest 单元测试（111 项）
 ```
 
 线上访问：**https://chenchen913.github.io/baibai/**（电脑/手机浏览器均可，纯前端，无后端）。
@@ -48,7 +48,8 @@ npm test         # vitest 单元测试（102 项）
 
 ## 更新记录
 
-- 前置任务（2026-08-13）：**Android 原生版迁移三份前置文档**（`android/`）：迁移 SPEC（技术栈修正为高德定位+地图、模块映射表、里程碑 A-M1~M5、双版本共存策略）、数据格式契约（网页↔安卓同一 JSON 格式、9 项业务常量硬编码对照、互通验收用例）、防杀与后台定位指南（四层防线：前台服务/START_STICKY/白名单路径矩阵/检查点兜底 + 高德定位参数 + 真机防杀测试方法）。
+- 前置任务·补充（2026-08-13）：新增 `android/开发环境与流程.md`（**本地零安卓工具链**：CI 云端构建 APK + JUnit/Robolectric 测试 + 真机验收的开发闭环与五步软件工程流程）；SPEC §9 双版本共存策略定案（网页版保留为复盘端与算法对照基准、同仓库、网页版冻结功能开发）。
+- 前置任务（2026-08-13）：**Android 原生版迁移三份前置文档**（`android/`）：迁移 SPEC、数据格式契约、防杀与后台定位指南。
 - UI 升级 + 实时地图（2026-08-13）：记录页重设计为**驾驶舱布局**；全站设计系统升级；新增 **Leaflet + OpenStreetMap 实时地图**；新增昌乐县模拟村 15/20 户实地仿真测试。
 - 修复（2026-08-13）：**致命修复——所有按钮失灵**（根因：四视图 `$` 选择器缺 `#` 前缀导致事件绑定崩溃，UI 渲染但无响应）；emoji 图标全面替换为 SVG 线性图标；背景装饰重绘；交互逻辑补全（出行方式按钮按状态禁用 + 切换反馈提示）；jsdom UI 冒烟测试防回归。
 - 发布（2026-08-13）：**上线** https://chenchen913.github.io/baibai/ （GitHub Pages，Actions 自动构建+测试+部署；README 记录线上地址）。
