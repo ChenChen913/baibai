@@ -8,6 +8,7 @@ import { mergeNodes, removePoint, renameNode, splitVisit } from './review.js';
 export interface ReviewDeps {
   onBack(): void;
   onSave(s: SessionData): void;
+  onOptimize(s: SessionData): void;
 }
 
 const W = 480;
@@ -51,6 +52,7 @@ export function mountReviewView(
       <div class="bar">
         <button id="rv-back" class="secondary small">← 返回</button>
         <div class="bar-title" id="rv-title"></div>
+        <button id="rv-opt" class="small" style="margin-left:auto">三线对比 ✨</button>
       </div>
       <div class="stat-line" id="rv-stats"></div>
       <div class="canvas-box">
@@ -262,6 +264,7 @@ export function mountReviewView(
   }
 
   $('rv-back').addEventListener('click', () => deps.onBack());
+  $('rv-opt').addEventListener('click', () => deps.onOptimize(s));
   $('rv-play').addEventListener('click', () => {
     if (pl.pts.length === 0) return;
     if (playing) {

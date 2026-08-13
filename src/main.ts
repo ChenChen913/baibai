@@ -5,6 +5,7 @@ import { RecorderState } from './state.js';
 import { GpsTracker } from './gps.js';
 import { mountUi, type Ui } from './ui.js';
 import { mountReviewView } from './review-ui.js';
+import { mountOptimizeView } from './optimize-ui.js';
 import { generateDemoSession } from './demo.js';
 import type { SessionData } from './state.js';
 import {
@@ -22,7 +23,7 @@ const gps = new GpsTracker();
 let recorder: RecorderState | null = null;
 let pendingStart = false;
 let wakeLock: { release: () => Promise<void> } | null = null;
-let view: 'record' | 'history' | 'review' = 'record';
+let view: 'record' | 'history' | 'review' | 'optimize' = 'record';
 
 const now = (): number => Date.now();
 const vibrate = (): void => {
@@ -186,6 +187,12 @@ function showReview(sess: SessionData): void {
   mountReviewView(app, sess, {
     onBack: () => void showHistory(),
     onSave: (s2) => void saveSession(s2).catch((e) => console.warn('[db]', e)),
+    onOptimize: (s2) => {
+      view = 'optimize';
+      mountOptimizeView(app, s2, {
+        onBack: () => showReview(s2),
+      });
+    },
   });
 }
 

@@ -264,3 +264,60 @@ select {
 .empty {
   opacity: 0.6;
 }
+
+/* ---------- 三线对比 ---------- */
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 14px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card span {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.card b {
+  font-size: 22px;
+  color: var(--accent);
+}
+
+.opt-actual {
+  fill: none;
+  stroke: rgba(200, 64, 47, 0.45);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.opt-morph {
+  fill: none;
+  stroke: #c9971c;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.node.lit circle {
+  fill: #fff;
+  stroke-width: 3;
+}
+
+.node.lit text {
+  font-weight: 800;
+}
+
+.hint {
+  font-size: 13px;
+  opacity: 0.7;
+  margin: 8px 0 0;
+}

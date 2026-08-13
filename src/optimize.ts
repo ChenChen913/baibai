@@ -112,3 +112,50 @@ export function optimizeSession(s: SessionData): Route[] {
 
   return [mk('fly', fly), mk('walk_dist', dist), mk('walk_time', time)];
 }
+
+/** 成绩单（F-14）：实走 vs 时间最优 vs 飞行最优。对比口径均为"路上时间/距离"，不含户内停留 */
+export interface Scorecard {
+  actualDistM: number;
+  actualMoveSec: number; // 路上时间（Σ 边行程，不含停留）
+  actualTotalSec: number; // 全天总时长（含停留，仅展示）
+  bikeDistM: number;
+  timeOptSec: number;
+  distOptM: number;
+  flyOptM: number;
+  savingsTimePct: number; // 时间最优节省（路上时间口径）
+  savingsDistPct: number; // 距离最优节省
+  savingsFlyPct: number; // 若能飞
+}
+
+export function scorecard(s: SessionData, routes: Route[]): Scorecard {
+  const edges = buildEdges(s);
+  const actualDistM = edges.reduce((x, e) => x + e.distM, 0);
+  const actualMoveSec = edges.reduce(
+    (x, e) => x + (e.arriveT - e.departT) / 1000,
+    0,
+  );
+  const first = s.points[0]?.t ?? s.createdAt;
+  const last = s.points[s.points.length - 1]?.t ?? s.updatedAt;
+  const actualTotalSec = Math.max(0, (last - first) / 1000);
+  const bikeDistM = edges
+    .filter((e) => e.mode === 'bike')
+    .reduce((x, e) => x + e.distM, 0);
+  const get = (mode: Route['mode']) => routes.find((r) => r.mode === mode)!.cost;
+  const pct = (opt: number, actual: number): number =>
+    actual > 0 ? Math.max(0, (1 - opt / actual) * 100) : 0;
+  const timeOptSec = get('walk_time');
+  const distOptM = get('walk_dist');
+  const flyOptM = get('fly');
+  return {
+    actualDistM,
+    actualMoveSec,
+    actualTotalSec,
+    bikeDistM,
+    timeOptSec,
+    distOptM,
+    flyOptM,
+    savingsTimePct: pct(timeOptSec, actualMoveSec),
+    savingsDistPct: pct(distOptM, actualDistM),
+    savingsFlyPct: pct(flyOptM, actualDistM),
+  };
+}
