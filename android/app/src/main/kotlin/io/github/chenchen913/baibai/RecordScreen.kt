@@ -1,10 +1,15 @@
 package io.github.chenchen913.baibai
 
 import android.annotation.SuppressLint
+import android.util.Log
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import java.io.ByteArrayInputStream
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -69,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.chenchen913.baibai.core.cny.Cny
+import io.github.chenchen913.baibai.core.model.LatLng
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.SessionState
 import io.github.chenchen913.baibai.core.model.TrackPoint
@@ -93,6 +99,9 @@ private val STATE_LABEL = mapOf(
 
 private val GlassCardBg = Color(0xCCFFFFFF) // 白 80%
 private val GlassCardBorder = Color(0x66FFFFFF) // 白 40%
+
+/** 瓦片/地图链路统一日志 tag（P4）：logcat 过滤 BaibaiMap 即可看全链路 */
+private const val MAP_LOG = "BaibaiMap"
 
 /** 记录页（原始需求 §7.1）：
  * 品牌栏 → 状态大卡 → 实时地图卡（可折叠，展开约屏高 30~35%）→ 主按钮区 → 工具条。
@@ -441,8 +450,11 @@ private fun TimeColumn(digitSp: Float, modifier: Modifier) {
     }
 }
 
-/* ---------- 3. 实时地图卡（真实地图：WebView + Leaflet + OpenStreetMap，免 Key 免费） ----------
- * 折叠 = 40dp 标题条，展开 = 屏高 30%~35%；瓦片加载失败自动换源，最后暖色纸底兜底，轨迹/标记照常绘制。 */
+/* ---------- 3. 实时地图卡（真实地图：WebView + Leaflet + 高德/OSM，免 Key 免费） ----------
+ * 折叠 = 40dp 标题条，展开 = 屏高 30%~35%。
+ * 瓦片：shouldInterceptRequest 只查本地缓存（命中即返回；未命中异步回填并放行 WebView 自取），
+ * 预载走 TileCache 独立线程池，两者互不阻塞（审核报告 P1/P3）；
+ * 失败自动换源（高德→OSM），全部失败时 map.html 显示可见兜底浮层（P6），轨迹/标记照常绘制。 */
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -498,6 +510,18 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                     preloadedFor = key
                     startPreload(snap.home.lat, snap.home.lng)
                 }
+            }
+        } else {
+            // P7：IDLE 态把地图中心移到用户上次的位置（当前定位源 / 系统最后已知位置 / 最近一次记录的家），
+            // 而不是固定潍坊——避免用户误以为"地图加载错了"
+            val lastFix = RecorderHub.source?.lastFix?.pos ?: systemLastKnown(appContext)
+            // listSessions 已按 createdAt 降序；I/O 放后台线程，避免主线程解码卡顿（Low-6）
+            val histHome = withContext(Dispatchers.IO) {
+                RecorderHub.store.listSessions().firstOrNull()?.home
+            }
+            val c = lastFix ?: histHome
+            if (c != null && (c.lat != 0.0 || c.lng != 0.0)) {
+                w.evaluateJavascript("BaibaiMap.center(" + c.lat + "," + c.lng + ",14)", null)
             }
         }
     }
@@ -589,14 +613,43 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                         settings.builtInZoomControls = false
                         settings.setSupportZoom(false)
                         settings.displayZoomControls = false
-                        settings.userAgentString = settings.userAgentString + " baibai/0.1"
+                        // P5：与 TileCache 完全一致的 UA（浏览器默认 UA + baibai 标识），命中/未命中行为不再分裂
+                        settings.userAgentString = tileCache.userAgent
+                        // P4：把 map.html 的 console.warn/error 接到 logcat（tag=BaibaiMap），真机可定位
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
+                                cm?.let {
+                                    Log.w(
+                                        MAP_LOG,
+                                        "[js:" + it.messageLevel() + "] " + it.message() +
+                                            " @" + it.sourceId() + ":" + it.lineNumber(),
+                                    )
+                                }
+                                return true
+                            }
+                        }
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 pageReady = true
                             }
 
-                            // P0：瓦片请求统一走 TileCache（缓存优先→网络→缓存兜底），
-                            // 预载过的区域断网也能显示；未预载区域在线浏览时顺带入库
+                            // P4：页面/资源加载失败可见化
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                                error: WebResourceError?,
+                            ) {
+                                Log.w(
+                                    MAP_LOG,
+                                    "WebView 加载错误：" + request?.url + " code=" + error?.errorCode +
+                                        " " + error?.description,
+                                )
+                            }
+
+                            // P0 缓存 + P1/P2/P3 修复：
+                            // - 命中缓存 → 立即返回（MIME 按 URL 判定：style=6 卫星实为 JPEG，P2）；
+                            // - 未命中 → 异步回填缓存并返回 null 放行 WebView 自取（并发快、自带重试，P3），
+                            //   绝不在此线程做同步 HTTP，避免 WebView 网络线程池被占死、被预载饿死（P1）。
                             override fun shouldInterceptRequest(
                                 view: WebView?,
                                 request: WebResourceRequest?,
@@ -605,14 +658,24 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 val isTile = u.contains("is.autonavi.com/appmaptile") ||
                                     u.contains("tile.openstreetmap.org")
                                 if (!isTile) return null
-                                val bytes = tileCache.download(u) ?: return null
+                                val bytes = tileCache.get(u)
+                                if (bytes == null) {
+                                    // 放行后由 WebView 直连拉取：UA 已与缓存侧统一；Referer 无法在直连路径追加，
+                                    // 实测高德/OSM 对无 Referer 的浏览器 UA 放行（审核报告 §四），风险可控
+                                    Log.i(MAP_LOG, "瓦片未命中缓存，异步回填：" + u)
+                                    scope.launch(Dispatchers.IO) {
+                                        runCatching { tileCache.download(u) }
+                                    }
+                                    return null // 让 WebView 自取（并发 + 自带重试）
+                                }
+                                val mime = if (u.contains("style=6")) "image/jpeg" else "image/png"
                                 return WebResourceResponse(
-                                    "image/png",
+                                    mime,
                                     null,
                                     200,
                                     "OK",
                                     mapOf("Cache-Control" to "max-age=31536000, immutable"),
-                                    java.io.ByteArrayInputStream(bytes),
+                                    ByteArrayInputStream(bytes),
                                 )
                             }
                         }
@@ -673,6 +736,18 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
             }
         }
     }
+}
+
+/** P7：读系统最后已知位置（GPS→网络），不启动持续定位、不申请权限；无权限/拿不到返回 null */
+@SuppressLint("MissingPermission")
+private fun systemLastKnown(context: android.content.Context): LatLng? {
+    val lm = context.getSystemService(android.content.Context.LOCATION_SERVICE)
+        as? android.location.LocationManager ?: return null
+    val loc = runCatching {
+        lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+            ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+    }.getOrNull() ?: return null
+    return LatLng(loc.latitude, loc.longitude)
 }
 
 /** 定位点列表 → JS 参数 JSON（[[lat,lng],...]） */

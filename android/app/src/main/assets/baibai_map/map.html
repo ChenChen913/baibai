@@ -27,6 +27,19 @@
   .layer-switch button.on {
     background:linear-gradient(135deg,#C8402F,#A62D22); color:#fff;
   }
+  /* P6：地图失败可见兜底浮层（高德+OSM 全部失败时显示） */
+  .map-error-overlay {
+    position:absolute; left:0; right:0; top:0; bottom:0; z-index:2000;
+    display:none; align-items:center; justify-content:center; pointer-events:none;
+  }
+  .map-error-card {
+    max-width:78%; background:rgba(255,251,243,.97); color:#5A3A2A;
+    border:1px solid rgba(90,58,42,.15); border-radius:14px; padding:14px 18px;
+    font-size:13px; font-weight:700; line-height:1.7; text-align:center;
+    box-shadow:0 6px 20px rgba(90,58,42,.18); pointer-events:auto;
+  }
+  .map-error-card b { color:#C8402F; }
+  .map-error-card .hint { font-size:11px; font-weight:500; opacity:.7; }
 </style>
 </head>
 <body>
@@ -36,6 +49,13 @@
   <button id="btn-sat">卫星</button>
 </div>
 <div class="attribution">© 高德地图 / OpenStreetMap</div>
+<div id="map-error" class="map-error-overlay">
+  <div class="map-error-card">
+    ⚠️ <b>地图暂不可用</b><br/>
+    请检查网络，或点上方「预载」提前缓存周边<br/>
+    <span class="hint">轨迹与拜访记录不受影响，仍会正常保存</span>
+  </div>
+</div>
 <script src="leaflet.js"></script>
 <script>
 (function () {
@@ -80,6 +100,21 @@
   var street = null, sat = null, curLayer = 'street';
   var streetSrc = 0, streetErr = 0, satErr = 0;
 
+  /* ---------- P6：地图失败可见兜底（高德+OSM 均失败时显示，替代"无声空白"） ---------- */
+  var mapErrorEl = document.getElementById('map-error');
+  var mapErrorShown = false;
+  function showMapError() {
+    if (mapErrorShown || !mapErrorEl) return;
+    mapErrorShown = true;
+    mapErrorEl.style.display = 'flex';
+    console.warn('[BaibaiMap] 地图瓦片全部失败，显示兜底提示');
+  }
+  function hideMapError() {
+    if (!mapErrorShown || !mapErrorEl) return;
+    mapErrorShown = false;
+    mapErrorEl.style.display = 'none';
+  }
+
   function makeStreet() {
     var isGaode = streetSrc === 0;
     var url = isGaode
@@ -88,9 +123,19 @@
     var opts = { maxZoom: 19 };
     if (isGaode) opts.subdomains = '1234';
     var layer = L.tileLayer(url, opts);
-    layer.on('tileerror', function () {
+    // P4：成功/失败都打日志；成功即重置错误计数并隐藏兜底浮层（P6）
+    layer.on('tileload', function () {
+      streetErr = 0;
+      // 街道层（高德或 OSM）瓦片成功即表示底图可用，隐藏兜底浮层——
+      // 不能只看 streetSrc===1，否则"卫星失败→切回高德街道成功"后浮层会永远不消失
+      if (curLayer === 'street') hideMapError();
+    });
+    layer.on('tileerror', function (e) {
       streetErr += 1;
+      console.warn('[BaibaiMap] 街道瓦片失败 #' + streetErr + '：' +
+        (e && e.tile && e.tile.src ? e.tile.src : 'unknown'));
       if (streetErr > 6 && streetSrc === 0) {
+        console.warn('[BaibaiMap] 高德街道瓦片连续失败，回退 OSM');
         streetSrc = 1;
         streetErr = 0;
         useGcj = false; // OSM 是 WGS-84，切回原坐标
@@ -99,6 +144,7 @@
         redrawAll();
         return;
       }
+      if (streetErr > 6 && streetSrc === 1) showMapError();
     });
     street = layer;
     if (curLayer === 'street') street.addTo(map);
@@ -109,7 +155,17 @@
       'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
       { maxZoom: 19, subdomains: '1234' },
     );
-    sat.on('tileerror', function () { satErr += 1; });
+    // P4：卫星层无兜底源，失败打日志；连续失败且当前在卫星层时显示兜底浮层（P6）
+    sat.on('tileload', function () {
+      satErr = 0;
+      if (curLayer === 'sat') hideMapError();
+    });
+    sat.on('tileerror', function (e) {
+      satErr += 1;
+      console.warn('[BaibaiMap] 卫星瓦片失败 #' + satErr + '：' +
+        (e && e.tile && e.tile.src ? e.tile.src : 'unknown'));
+      if (satErr > 6 && curLayer === 'sat') showMapError();
+    });
     if (curLayer === 'sat') sat.addTo(map);
   }
 
@@ -237,6 +293,12 @@
       if (!isFinite(lat) || !isFinite(lng)) return;
       drawMe(lat, lng, acc);
       map.setView(cvt([lat, lng]), Math.max(map.getZoom(), 16), { animate: true });
+    },
+
+    // P7：仅移动视野不画点（IDLE 态把地图中心放到用户上次的位置）
+    center: function (lat, lng, zoom) {
+      if (!isFinite(lat) || !isFinite(lng)) return;
+      map.setView(cvt([lat, lng]), zoom || 14, { animate: false });
     },
 
     // 整条轨迹 + 段起点下标（恢复/继续/重新展开时全量同步）
