@@ -90,6 +90,13 @@ class JsonStore(
         return json.encodeToString(ExportFile.serializer(), export)
     }
 
+    /** 全量导入（网页版导出文件 → 本机会话库）；返回导入会话数 */
+    fun importAllJson(text: String): Int {
+        val export = json.decodeFromString(ExportFile.serializer(), text)
+        export.sessions.forEach { saveSession(it) }
+        return export.sessions.size
+    }
+
     private fun atomicWrite(f: File, content: String) {
         f.parentFile?.mkdirs()
         val tmp = File(f.parentFile, f.name + ".tmp")

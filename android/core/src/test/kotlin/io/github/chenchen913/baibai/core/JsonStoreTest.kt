@@ -78,4 +78,17 @@ class JsonStoreTest {
         assertEquals("baibai", parsed["app"]?.jsonPrimitive?.content)
         assertEquals(1, parsed["sessions"]?.jsonArray?.size)
     }
+
+    @Test
+    fun `导入导出往返（互通契约）`() {
+        val store = JsonStore(tmp)
+        val s = io.github.chenchen913.baibai.core.demo.Demo.generateDemoSession()
+        store.saveSession(s)
+        val json = store.exportAllJson()
+
+        val store2 = JsonStore(File(tmp, "other"))
+        val n = store2.importAllJson(json)
+        assertEquals(1, n)
+        assertEquals(s, store2.listSessions().first())
+    }
 }
