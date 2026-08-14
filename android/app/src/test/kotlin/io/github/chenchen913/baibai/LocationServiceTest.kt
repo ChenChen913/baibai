@@ -64,10 +64,10 @@ class LocationServiceTest {
         RecorderHub.resetForTest(clearStore = false)
         assertNull(RecorderHub.recorder)
 
-        // 服务以 null intent 重建（START_STICKY 语义）
-        val controller = Robolectric.buildService(LocationService::class.java)
+        // 服务以 null intent 重建（START_STICKY 语义：buildService 传入 null，startCommand(flags,startId) 沿用）
+        val controller = Robolectric.buildService(LocationService::class.java, null)
             .create()
-            .startCommand(null, 0, 0)
+            .startCommand(0, 0)
         assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
         assertEquals(0, RecorderHub.recorder?.snapshot()?.points?.size ?: -1) // 恢复时尚未产生新轨迹点
 
