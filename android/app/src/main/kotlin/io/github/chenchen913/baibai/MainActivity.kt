@@ -40,6 +40,13 @@ class MainActivity : ComponentActivity() {
 private const val PREFS = "baibai_prefs"
 private const val KEY_WHITELIST_SEEN = "whitelist_seen"
 
+private sealed interface Screen {
+    data object Record : Screen
+    data object Whitelist : Screen
+    data object History : Screen
+    data class Review(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
+}
+
 @Composable
 fun AppRoot() {
     val ctx = LocalContext.current
@@ -48,11 +55,20 @@ fun AppRoot() {
 
     val pendingRestore by RecorderHub.pendingRestore.collectAsState()
     val finishTooFar by RecorderHub.finishTooFar.collectAsState()
+    val session by RecorderHub.session.collectAsState()
+    var screen by remember { mutableStateOf<Screen>(Screen.Record) }
     var showWhitelist by remember { mutableStateOf(false) }
 
     // toast 消息
     LaunchedEffect(Unit) {
         RecorderHub.messages.collect { snackbar.showSnackbar(it) }
+    }
+
+    // 结束拜年后自动进入回顾页（沿用网页版行为）
+    LaunchedEffect(session) {
+        if (session?.state == io.github.chenchen913.baibai.core.model.SessionState.FINISHED && screen is Screen.Record) {
+            screen = Screen.Review(session!!)
+        }
     }
 
     // 权限请求（定位 + 通知）
@@ -92,16 +108,30 @@ fun AppRoot() {
         RecorderHub.startPressed()
     }
 
-    if (showWhitelist) {
-        WhitelistGuideScreen(
+    when (screen) {
+        is Screen.Record -> RecordScreen(
+            onStartRequest = { requestStart() },
+            onHistory = { screen = Screen.History },
+        )
+
+        is Screen.Whitelist -> WhitelistGuideScreen(
             onDone = {
                 prefs.edit().putBoolean(KEY_WHITELIST_SEEN, true).apply()
-                showWhitelist = false
+                screen = Screen.Record
                 requestStart()
             },
         )
-    } else {
-        RecordScreen(onStartRequest = { requestStart() })
+
+        is Screen.History -> HistoryScreen(
+            onBack = { screen = Screen.Record },
+            onOpen = { s -> screen = Screen.Review(s) },
+        )
+
+        is Screen.Review -> ReviewScreen(
+            initial = screen.session,
+            onBack = { screen = Screen.History },
+            onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
+        )
     }
 
     // 崩溃恢复：检测到未完成检查点

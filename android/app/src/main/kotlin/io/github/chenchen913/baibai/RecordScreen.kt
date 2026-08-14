@@ -51,7 +51,7 @@ private val STATE_LABEL = mapOf(
 
 /** 记录页（驾驶舱最小可用版）。onStartRequest 由外层处理权限/白名单后再真正调用 hub.startPressed() */
 @Composable
-fun RecordScreen(onStartRequest: () -> Unit) {
+fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit) {
     val session by RecorderHub.session.collectAsState()
     val waiting by RecorderHub.waiting.collectAsState()
     val gpsAcc by RecorderHub.gpsAcc.collectAsState()
@@ -180,6 +180,9 @@ fun RecordScreen(onStartRequest: () -> Unit) {
                 modifier = Modifier.weight(1f),
             ) {
                 Text("骑车", color = if (mode == Mode.BIKE) BaibaiAccent else BaibaiInk)
+            }
+            OutlinedButton(onClick = onHistory, modifier = Modifier.weight(1f)) {
+                Text("历史", color = BaibaiInk)
             }
         }
     }
