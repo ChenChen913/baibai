@@ -14,4 +14,8 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        events("failed")
+        showStandardStreams = true // 回显 println（昌乐县仿真报告对照用）
+    }
 }
