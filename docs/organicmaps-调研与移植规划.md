@@ -46,8 +46,9 @@ OM 官方把安卓端拆成可发布 SDK（android/sdk，包名 app.organicmaps.
 - **结论**：工程量与维护代价对"个人拜年轨迹玩具"明显过重。**不推荐作为首选；若将来真要嵌入式能力，A1（Maven artifact）优先于 A2（源码编译）。**
 
 ### B 档：剥离 drape 做"小渲染库"
-- **不可行**：最小切面仍有 ~15 万行 C++；drape 硬耦合 indexer/platform/geometry/coding/base + freetype/harfbuzz/ICU/expat；底图必须吃 .mwm；需 fork 仓库改 CMake 解耦。
-- **补充发现**：drape 是纯渲染层、不含地图语义；真正有意义的复用边界是更上层的 map（Framework 聚合类）——抽 drape 收益低、代价高。
+- **不可行**：核心渲染三件套实测 431 文件 / 61,618 行（drape 181 文件 23,293 行 + drape_frontend 227 文件 35,817 行 + shaders 23 文件 2,508 行）；再叠加必需底层 base/coding/geometry/platform/indexer ≈ 9.4 万行，**最小切面 ≈ 15 万行 C++**；drape 硬耦合 indexer/platform/geometry/coding/base + freetype/harfbuzz/ICU/expat（libs/drape/CMakeLists.txt 的 DRAPE_LINK_LIBRARIES 直接证明）；GL ES 3.0 硬约束（gl_shaders_preprocessor.py:325）；底图必须吃 .mwm；需 fork 仓库改 CMake 解耦。
+- **补充发现 1**：drape 是纯渲染层、不含地图语义；真正有意义的复用边界是更上层的 map（Framework 聚合类）——抽 drape 收益低、代价高。
+- **补充发现 2**：若**只画轨迹/标记、不要底图**，理论上可砍掉 indexer 的 MWM 数据通路（DrapeApi::AddLine 可直接注入任意折线，不需要 .mwm）——但仍有 overlay_handle.hpp→indexer 的浅耦合要 fork 改造，且"没有底图的渲染器"对 baibai 无意义。
 - **结论**：**否决**（两个子任务独立得出同一结论）。
 
 ### C 档：借"离线优先"思想 + 轻量引擎（推荐）
