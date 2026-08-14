@@ -55,6 +55,7 @@ object RecorderHub {
     var source: LocationSource? = null // 测试可注入 FakeSource
     var recorder: RecorderState? = null
         private set
+    var useForegroundService = true // 测试可关闭（避免测试里嵌套启动服务）
 
     private var context: Context? = null
     private var watchdogJob: Job? = null
@@ -93,7 +94,7 @@ object RecorderHub {
         _pendingRestore.value = false
         _gpsAcc.value = source?.lastFix?.acc
         if (recorder?.currentState == io.github.chenchen913.baibai.core.model.SessionState.WALKING) {
-            startSourceIfNeeded()
+            ensureSourceRunning()
         }
     }
 
@@ -103,12 +104,42 @@ object RecorderHub {
         _session.value = null
     }
 
+    /** 供 LocationService 调用：确保定位源运行（幂等） */
+    fun ensureSourceRunning() {
+        val src = source ?: return
+        if (src.active) return
+        src.start(
+            object : LocationCallbacks {
+                override fun onFix(f: Fix) = applyFix(f)
+                override fun onError(kind: GpsErrorKind, message: String) = handleGpsError(kind)
+            },
+        )
+    }
+
+    /** 供 LocationService 调用：停定位源 */
+    fun stopLocationSource() {
+        source?.stop()
+    }
+
+    /** START_STICKY 重启后的静默恢复（无弹窗——用户可能不在前台） */
+    fun autoResumeFromCheckpoint() {
+        if (recorder != null) return
+        val ck = runCatching { store.loadActive() }.getOrNull() ?: return
+        if (ck.session.finished) return
+        recorder = RecorderState.restore(ck)
+        _session.value = recorder?.snapshot()
+        if (recorder?.currentState == io.github.chenchen913.baibai.core.model.SessionState.WALKING) {
+            ensureSourceRunning()
+        }
+    }
+
     // ---------- 按钮动作（UI 线程） ----------
 
     fun startPressed() {
         if (recorder != null) return
+        startKeepAliveService()
         _waiting.value = true
-        startSourceIfNeeded()
+        ensureSourceRunning()
         vibrate()
         emit("正在获取定位…")
         watchdogJob?.cancel()
@@ -124,7 +155,7 @@ object RecorderHub {
         val r = recorder ?: return
         try {
             r.pause(source?.recent(3) ?: emptyList(), nowMs())
-            stopSource() // SPEC §7：PAUSED 停定位（省电 + 防屋内漂移）
+            stopLocationSource() // SPEC §7：PAUSED 停定位（省电 + 防屋内漂移）
             vibrate()
             flushNow()
             _session.value = r.snapshot()
@@ -136,7 +167,7 @@ object RecorderHub {
     fun resumePressed() {
         val r = recorder ?: return
         r.resume(nowMs())
-        startSourceIfNeeded()
+        ensureSourceRunning()
         vibrate()
         flushNow()
         _session.value = r.snapshot()
@@ -158,7 +189,8 @@ object RecorderHub {
         val res = r.finish(source?.recent(3) ?: emptyList(), nowMs(), force)
         if (res is FinishResult.Ok) {
             _finishTooFar.value = null
-            stopSource()
+            stopLocationSource()
+            stopKeepAliveService()
             val saved = r.snapshot()
             runCatching { store.saveSession(saved) }
             runCatching { store.clearActive() }
@@ -243,19 +275,19 @@ object RecorderHub {
 
     // ---------- 内部 ----------
 
-    private fun startSourceIfNeeded() {
-        val src = source ?: return
-        if (src.active) return
-        src.start(
-            object : LocationCallbacks {
-                override fun onFix(f: Fix) = applyFix(f)
-                override fun onError(kind: GpsErrorKind, message: String) = handleGpsError(kind)
-            },
-        )
+    private fun startKeepAliveService() {
+        if (!useForegroundService) return
+        val c = context ?: return
+        runCatching {
+            val i = android.content.Intent(c, LocationService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i) else c.startService(i)
+        }
     }
 
-    private fun stopSource() {
-        source?.stop()
+    private fun stopKeepAliveService() {
+        if (!useForegroundService) return
+        val c = context ?: return
+        runCatching { c.stopService(android.content.Intent(c, LocationService::class.java)) }
     }
 
     private fun vibrate() {

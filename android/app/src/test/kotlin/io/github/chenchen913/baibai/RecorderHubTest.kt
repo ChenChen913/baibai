@@ -60,6 +60,7 @@ class RecorderHubTest {
         RecorderHub.init(app)
         fake = FakeSource(HOME)
         RecorderHub.source = fake
+        RecorderHub.useForegroundService = false // 本类聚焦 Hub 逻辑，服务在 LocationServiceTest 单独测
         RecorderHub.resetForTest(clearStore = true)
     }
 
