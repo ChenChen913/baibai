@@ -57,6 +57,11 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 sessions.value.forEach { s ->
+                    val stat = runCatching {
+                        val routes = io.github.chenchen913.baibai.core.optimize.Optimize.optimizeSession(s)
+                        val c = io.github.chenchen913.baibai.core.optimize.Optimize.scorecard(s, routes)
+                        "${s.nodes.size} 户 · ${"%.2f".format(c.actualDistM / 1000)} km · 绕路率 ${c.savingsTimePct.toInt()}%"
+                    }.getOrElse { "${s.nodes.size} 户" }
                     Card(
                         onClick = { onOpen(s) },
                         modifier = Modifier.fillMaxWidth(),
@@ -67,7 +72,7 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
                         Column(Modifier.padding(14.dp)) {
                             Text("📅 ${s.date}", fontWeight = FontWeight.Bold, color = BaibaiInk)
                             Text(
-                                "${s.nodes.size} 户 · ${s.visits.size} 次到访 · ${s.points.size} 轨迹点",
+                                stat,
                                 fontSize = 12.sp,
                                 color = BaibaiInk.copy(alpha = 0.6f),
                             )

@@ -45,6 +45,7 @@ private sealed interface Screen {
     data object Whitelist : Screen
     data object History : Screen
     data class Review(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
+    data class Optimize(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
 }
 
 @Composable
@@ -133,6 +134,15 @@ fun AppRoot() {
                 initial = reviewScreen.session,
                 onBack = { screen = Screen.History },
                 onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
+                onOptimize = { screen = Screen.Optimize(reviewScreen.session) },
+            )
+        }
+
+        is Screen.Optimize -> {
+            val optimizeScreen = screen as Screen.Optimize
+            OptimizeScreen(
+                session = optimizeScreen.session,
+                onBack = { screen = Screen.Review(optimizeScreen.session) },
             )
         }
     }

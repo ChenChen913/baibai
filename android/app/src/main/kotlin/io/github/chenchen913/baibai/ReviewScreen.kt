@@ -67,7 +67,12 @@ private fun fmtClock(t: Long): String {
 
 /** 回顾页（A-M2）：Canvas 轨迹回放 + 收拾（改名/合并点选芯片/拆分/跳变剔除） */
 @Composable
-fun ReviewScreen(initial: SessionData, onBack: () -> Unit, onSave: (SessionData) -> Unit) {
+fun ReviewScreen(
+    initial: SessionData,
+    onBack: () -> Unit,
+    onSave: (SessionData) -> Unit,
+    onOptimize: () -> Unit,
+) {
     var s by remember { mutableStateOf(initial) }
     fun mutate(next: SessionData) {
         s = next
@@ -109,6 +114,10 @@ fun ReviewScreen(initial: SessionData, onBack: () -> Unit, onSave: (SessionData)
             }
             Spacer(Modifier.weight(1f))
             Text("${s.date} · 拜年复盘", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = BaibaiInk)
+            Spacer(Modifier.weight(1f))
+            Button(onClick = onOptimize, colors = ButtonDefaults.buttonColors(containerColor = BaibaiAccent)) {
+                Text("三线对比", fontSize = 13.sp)
+            }
         }
 
         Spacer(Modifier.height(12.dp))
