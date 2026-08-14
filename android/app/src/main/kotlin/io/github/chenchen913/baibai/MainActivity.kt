@@ -127,11 +127,14 @@ fun AppRoot() {
             onOpen = { s -> screen = Screen.Review(s) },
         )
 
-        is Screen.Review -> ReviewScreen(
-            initial = screen.session,
-            onBack = { screen = Screen.History },
-            onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
-        )
+        is Screen.Review -> {
+            val reviewScreen = screen as Screen.Review
+            ReviewScreen(
+                initial = reviewScreen.session,
+                onBack = { screen = Screen.History },
+                onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
+            )
+        }
     }
 
     // 崩溃恢复：检测到未完成检查点

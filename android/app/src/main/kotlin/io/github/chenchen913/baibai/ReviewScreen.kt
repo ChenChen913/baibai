@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
@@ -131,14 +132,14 @@ fun ReviewScreen(initial: SessionData, onBack: () -> Unit, onSave: (SessionData)
                         else path.lineTo(p.x.toFloat(), p.y.toFloat())
                     }
                     // 底轨
-                    drawPath(path, color = BaibaiAccent.copy(alpha = 0.18f), style = Stroke(width = 4f, cap = StrokeCap.Round))
+                    drawPath(path.asComposePath(), color = BaibaiAccent.copy(alpha = 0.18f), style = Stroke(width = 4f, cap = StrokeCap.Round))
                     // 已播部分
                     val pm = PathMeasure(path, false)
                     val frac = Playback.fractionAt(plan, progressMs).toFloat()
                     if (pm.length > 0 && frac > 0) {
                         val partial = Path()
                         pm.getSegment(0f, pm.length * frac, partial, true)
-                        drawPath(partial, color = BaibaiAccent, style = Stroke(width = 4f, cap = StrokeCap.Round))
+                        drawPath(partial.asComposePath(), color = BaibaiAccent, style = Stroke(width = 4f, cap = StrokeCap.Round))
                     }
                     // 行进光点
                     Playback.positionAt(plan, progressMs)?.let { pos ->
@@ -150,7 +151,7 @@ fun ReviewScreen(initial: SessionData, onBack: () -> Unit, onSave: (SessionData)
                         color = 0xFF5A3A2A.toInt()
                         textSize = 15f * density
                         textAlign = Paint.Align.CENTER
-                        isFakeBold = true
+                        isFakeBoldText = true
                     }
                     fun project(p: LatLng) = Track.projectToView(listOf(p), W.toDouble(), H.toDouble())[0]
                     val homeProj = project(s.home)
