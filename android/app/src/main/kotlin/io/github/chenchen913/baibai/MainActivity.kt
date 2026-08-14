@@ -59,7 +59,6 @@ fun AppRoot() {
     val finishTooFar by RecorderHub.finishTooFar.collectAsState()
     val session by RecorderHub.session.collectAsState()
     var screen by remember { mutableStateOf<Screen>(Screen.Record) }
-    var showWhitelist by remember { mutableStateOf(false) }
 
     // toast 消息
     LaunchedEffect(Unit) {
@@ -94,7 +93,7 @@ fun AppRoot() {
 
     fun requestStart() {
         if (!prefs.getBoolean(KEY_WHITELIST_SEEN, false)) {
-            showWhitelist = true // 首次开始前引导白名单（第三层防杀）
+            screen = Screen.Whitelist // 首次开始前引导白名单（第三层防杀）——必须切 screen，否则点击无响应
             return
         }
         if (!hasLocationPermission()) {

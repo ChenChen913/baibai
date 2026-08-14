@@ -166,11 +166,15 @@ object RecorderHub {
 
     fun resumePressed() {
         val r = recorder ?: return
-        r.resume(nowMs())
-        ensureSourceRunning()
-        vibrate()
-        flushNow()
-        _session.value = r.snapshot()
+        try {
+            r.resume(nowMs())
+            ensureSourceRunning()
+            vibrate()
+            flushNow()
+            _session.value = r.snapshot()
+        } catch (e: IllegalStateException) {
+            emit(e.message ?: "操作失败") // 双击等非法转移不再崩溃
+        }
     }
 
     fun undoPressed() {
@@ -186,7 +190,12 @@ object RecorderHub {
     /** 返回 TooFar 时由 UI 弹确认，确认后带 force=true 再调 */
     fun finishPressed(force: Boolean = false): FinishResult? {
         val r = recorder ?: return null
-        val res = r.finish(source?.recent(3) ?: emptyList(), nowMs(), force)
+        val res = try {
+            r.finish(source?.recent(3) ?: emptyList(), nowMs(), force)
+        } catch (e: IllegalStateException) {
+            emit(e.message ?: "操作失败") // 双击等非法转移不再崩溃
+            return null
+        }
         if (res is FinishResult.Ok) {
             _finishTooFar.value = null
             stopLocationSource()
