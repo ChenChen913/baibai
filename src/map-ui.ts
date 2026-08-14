@@ -12,6 +12,8 @@ export interface MapController {
     home: { lat: number; lng: number },
     nodes: { id: string; name: string; autoNo: number; pos: { lat: number; lng: number } }[],
   ): void;
+  /** 容器尺寸变化后重算（地图折叠/展开后调用） */
+  invalidateSize(): void;
   destroy(): void;
 }
 
@@ -109,7 +111,12 @@ export function mountMap(
         }),
         zIndexOffset: 150,
       });
-      if (n.name) m.bindTooltip(n.name, { direction: 'top', offset: [0, -14] });
+      // P11：户名为用户数据，用 textContent 容器防 XSS（Leaflet 字符串 tooltip 走 innerHTML）
+      if (n.name) {
+        const label = document.createElement('div');
+        label.textContent = n.name;
+        m.bindTooltip(label, { direction: 'top', offset: [0, -14] });
+      }
       nodeLayer.addLayer(m);
     }
   }
@@ -118,5 +125,9 @@ export function mountMap(
     map.remove();
   }
 
-  return { follow, setTrack, setNodes, destroy };
+  function invalidateSize(): void {
+    map.invalidateSize();
+  }
+
+  return { follow, setTrack, setNodes, invalidateSize, destroy };
 }

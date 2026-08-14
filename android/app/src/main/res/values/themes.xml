@@ -1,7 +1,7 @@
 <resources>
-    <!-- 暖色年味主题（无 Material XML 依赖，Compose 侧另有配色） -->
+    <!-- 暖色年味主题（无 Material XML 依赖，Compose 侧另有配色）。
+         L-4：edge-to-edge 下状态栏由内容渐变透出，不再写死 statusBarColor（避免与 enableEdgeToEdge 冲突） -->
     <style name="Theme.Baibai" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#FFF8EE</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

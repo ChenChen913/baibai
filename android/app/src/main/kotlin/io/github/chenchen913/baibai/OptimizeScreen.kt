@@ -161,9 +161,9 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
 
-            // 成绩单 2×2
+            // 成绩单 2×2（M-2：实走卡补「路上时间」作为节省率对比基准）
             val scoreCards = listOf(
-                ScoreSpec(Icons.Filled.DirectionsWalk, "今年实走", fmtKm(card.actualDistM), "km", "骑行 ${fmtKm(card.bikeDistM)} · ${fmtMin(card.actualTotalSec)}", null),
+                ScoreSpec(Icons.Filled.DirectionsWalk, "今年实走", fmtKm(card.actualDistM), "km", "路上 ${fmtMin(card.actualMoveSec)} · 骑行 ${fmtKm(card.bikeDistM)} · 全天 ${fmtMin(card.actualTotalSec)}", null),
                 ScoreSpec(Icons.Filled.Psychology, "时间最优(理论)", fmtMin(card.timeOptSec), "", "比实走省 ${fmtPct(card.savingsTimePct)}", BaibaiAccent),
                 ScoreSpec(Icons.Filled.Straighten, "距离最优", fmtKm(card.distOptM), "km", "省 ${fmtPct(card.savingsDistPct)}", BaibaiAccent2),
                 ScoreSpec(Icons.Filled.Send, "如果能飞", fmtKm(card.flyOptM), "km", "少走 ${fmtPct(card.savingsFlyPct)}", BaibaiAccent2),

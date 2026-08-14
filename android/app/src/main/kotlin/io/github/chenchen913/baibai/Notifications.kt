@@ -29,9 +29,10 @@ object Notifications {
 
     fun build(context: Context, session: SessionData?): Notification {
         ensureChannel(context)
+        // P9：已拜访户数 = 唯一户数（nodes 不含 home）
         val text = when (session?.state) {
-            SessionState.WALKING -> "记录中 · 已拜访 ${session.visits.size} 户"
-            SessionState.PAUSED -> "在某户 · 已拜访 ${session.visits.size} 户"
+            SessionState.WALKING -> "记录中 · 已拜访 ${session.nodes.size} 户"
+            SessionState.PAUSED -> "在某户 · 已拜访 ${session.nodes.size} 户"
             else -> "拜年记录服务运行中"
         }
         val pi = PendingIntent.getActivity(

@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -82,15 +84,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
     val session by RecorderHub.session.collectAsState()
     val waiting by RecorderHub.waiting.collectAsState()
     val gpsAcc by RecorderHub.gpsAcc.collectAsState()
-
-    var tick by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            tick += 1
-            delay(1000)
-        }
-    }
-    val elapsed = remember(tick) { RecorderHub.elapsedMs() }
+    val feedbackOn by RecorderHub.feedbackOn.collectAsState()
 
     val st = session?.state ?: SessionState.IDLE
     val mode = session?.currentMode ?: Mode.WALK
@@ -111,15 +105,18 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
                         .padding(horizontal = 20.dp),
                 ) {
                     Spacer(Modifier.height(20.dp))
-                    BrandBar()
+                    BrandBar(
+                        feedbackOn = feedbackOn,
+                        onToggleFeedback = { RecorderHub.setFeedback(!feedbackOn) },
+                    )
                     Spacer(Modifier.height(20.dp))
                     StatusCard(
                         st = st,
                         recording = recording,
                         waiting = waiting,
                         gpsAcc = gpsAcc,
-                        visits = session?.visits?.size ?: 0,
-                        elapsed = elapsed,
+                        // P9：拜访户数 = 唯一户数（nodes 不含 home，中途回家/回访不虚高）
+                        visits = session?.nodes?.size ?: 0,
                         pageWidth = pageWidth,
                     )
                     Spacer(Modifier.height(16.dp))
@@ -196,7 +193,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
 /* ---------- 1. 品牌栏 ---------- */
 
 @Composable
-private fun BrandBar() {
+private fun BrandBar(feedbackOn: Boolean, onToggleFeedback: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
@@ -226,6 +223,15 @@ private fun BrandBar() {
         ) {
             Text("大年初一", fontSize = 12.sp, fontWeight = FontWeight.Black, color = BaibaiAccent2)
         }
+        Spacer(Modifier.width(4.dp))
+        // P6：提示音/震动开关（≥48dp 热区）
+        IconButton(onClick = onToggleFeedback) {
+            Icon(
+                if (feedbackOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                contentDescription = if (feedbackOn) "关闭提示音与震动" else "开启提示音与震动",
+                tint = if (feedbackOn) BaibaiInk.copy(alpha = 0.55f) else BaibaiInk.copy(alpha = 0.3f),
+            )
+        }
     }
 }
 
@@ -238,7 +244,6 @@ private fun StatusCard(
     waiting: Boolean,
     gpsAcc: Double?,
     visits: Int,
-    elapsed: Long,
     pageWidth: androidx.compose.ui.unit.Dp,
 ) {
     val subText = when {
@@ -277,13 +282,13 @@ private fun StatusCard(
                 color = BaibaiInk.copy(alpha = 0.6f),
             )
             Spacer(Modifier.height(22.dp))
-            StatsRow(visits = visits, elapsed = elapsed, pageWidth = pageWidth)
+            StatsRow(visits = visits, pageWidth = pageWidth)
         }
     }
 }
 
 @Composable
-private fun StatsRow(visits: Int, elapsed: Long, pageWidth: androidx.compose.ui.unit.Dp) {
+private fun StatsRow(visits: Int, pageWidth: androidx.compose.ui.unit.Dp) {
     val fontScale = LocalDensity.current.fontScale
     // HH:MM:SS 等宽 8 位 × 0.6em ≈ 4.8em；卡片内半宽 = (页宽 - 页边距40 - 卡边距40)/2，按此反推字号
     val digitSp = ((pageWidth.value - 80f) / 2f / 4.8f / fontScale).coerceIn(20f, 40f)
@@ -304,13 +309,7 @@ private fun StatsRow(visits: Int, elapsed: Long, pageWidth: androidx.compose.ui.
                 .height((digitSp * 1.2f).dp)
                 .background(BaibaiLine),
         )
-        StatColumn(
-            value = fmtClock(elapsed),
-            label = "本次用时",
-            color = BaibaiInk,
-            digitSp = digitSp,
-            modifier = Modifier.weight(1f),
-        )
+        TimeColumn(digitSp = digitSp, modifier = Modifier.weight(1f))
     }
 }
 
@@ -333,6 +332,39 @@ private fun StatColumn(value: String, label: String, color: Color, digitSp: Floa
         Spacer(Modifier.height(4.dp))
         Text(
             label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = BaibaiInk.copy(alpha = 0.45f),
+        )
+    }
+}
+
+/** 本次用时（M-5：秒级 tick 收敛在此节点，只重组这一列，不再整屏重组） */
+@Composable
+private fun TimeColumn(digitSp: Float, modifier: Modifier) {
+    var tick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            tick += 1
+            delay(1000)
+        }
+    }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier,
+    ) {
+        Text(
+            fmtClock(RecorderHub.elapsedMs()),
+            fontSize = digitSp.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = BaibaiInk,
+            maxLines = 1,
+            softWrap = false,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "本次用时",
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = BaibaiInk.copy(alpha = 0.45f),

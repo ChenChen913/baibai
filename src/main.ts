@@ -27,6 +27,10 @@ import type { Fix } from './geo.js';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 const gps = new GpsTracker();
+
+/** P11：所有插入 innerHTML 的用户/外部数据一律转义 */
+const escHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 let recorder: RecorderState | null = null;
 let pendingStart = false;
 let wakeLock: { release: () => Promise<void> } | null = null;
@@ -34,9 +38,38 @@ let view: 'record' | 'history' | 'review' | 'optimize' | 'plan' = 'record';
 let mapCtrl: MapController | null = null;
 
 const now = (): number => Date.now();
-const vibrate = (): void => {
-  navigator.vibrate?.(50);
+// D19 R3：震动 + 轻音效（默认开启，可关——P6）
+const FEEDBACK_KEY = 'baibai_feedback';
+const feedbackOn = (): boolean => {
+  try {
+    return localStorage.getItem(FEEDBACK_KEY) !== 'off';
+  } catch {
+    return true;
+  }
 };
+const vibrate = (): void => {
+  if (feedbackOn()) navigator.vibrate?.(50);
+};
+function beep(): void {
+  if (!feedbackOn()) return;
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.06;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.05);
+    window.setTimeout(() => {
+      void ctx.close();
+    }, 200);
+  } catch {
+    /* 不支持音频则静默 */
+  }
+}
 
 let gpsWatchdog: number | undefined;
 
@@ -113,6 +146,7 @@ function mountRecord(): Ui {
         recorder.pause(gps.recent(3), now());
         gps.stop(); // SPEC §7：PAUSED 停 GPS（省电 + 防屋内漂移）
         vibrate();
+        beep();
         flush();
         syncMap();
       } catch (e) {
@@ -128,6 +162,7 @@ function mountRecord(): Ui {
         ui.toast((e as Error).message);
       }
       vibrate();
+      beep();
       flush();
       syncMap();
     },
@@ -144,11 +179,20 @@ function mountRecord(): Ui {
       if (!recorder) return;
       const res = recorder.finish(gps.recent(3), now());
       if (!res.ok) {
-        const go = ui.confirm(
-          `当前位置距 Home 约 ${Math.round(res.distM)} 米，仍要结束吗？`,
-        );
-        if (!go) return;
-        recorder.finish(gps.recent(3), now(), true);
+        // P18：无定位时不显示 Infinity；P17：§7.8 文案与按钮
+        const distText = Number.isFinite(res.distM)
+          ? `当前位置距 Home 约 ${Math.round(res.distM)} 米`
+          : '当前位置无法定位';
+        void confirmDialog('结束拜年', `${distText}，仍要结束吗？`, '强制结束', '取消').then((go) => {
+          if (!go || !recorder) return;
+          try {
+            recorder.finish(gps.recent(3), now(), true);
+            complete();
+          } catch (e) {
+            ui.toast((e as Error).message);
+          }
+        });
+        return;
       }
       complete();
     },
@@ -169,13 +213,28 @@ function mountRecord(): Ui {
     onPlan() {
       showPlanView();
     },
+    onFeedbackToggle() {
+      toggleFeedback();
+    },
   });
   mapCtrl = mountMap(
     app.querySelector<HTMLElement>('#map')!,
     recorder ? recorder.snapshot.home : null,
   );
   syncMap();
+  ui.setFeedbackOn(feedbackOn());
   return ui;
+}
+
+function toggleFeedback(): void {
+  const next = !feedbackOn();
+  try {
+    localStorage.setItem(FEEDBACK_KEY, next ? 'on' : 'off');
+  } catch {
+    /* 隐私模式等存储不可用则忽略 */
+  }
+  ui.setFeedbackOn(next);
+  ui.toast(next ? '提示音与震动已开启' : '提示音与震动已关闭');
 }
 
 let ui: Ui;
@@ -194,6 +253,7 @@ function onFix(f: Fix): void {
     pendingStart = false;
     window.clearTimeout(gpsWatchdog);
     vibrate();
+    beep();
     flush();
     syncMap();
     ui.toast('开始记录！到一户按「暂停」');
@@ -218,6 +278,7 @@ function complete(): void {
   void saveSession(saved).catch((e) => console.warn('[db]', e));
   void clearActive();
   vibrate();
+  beep();
   showReview(saved);
 }
 
@@ -302,6 +363,7 @@ async function showHistory(): Promise<void> {
         <input id="h-file" type="file" accept="application/json,.json" style="display:none"/>
       </div>
       <p class="h-hint">导出/导入与安卓版同一格式：安卓记录 → 电脑复盘，或反之。</p>
+      <div id="h-summary" class="h-summary"></div>
       <div id="h-list" class="history-list"></div>
       <div id="toast"></div>
     </div>`;
@@ -341,17 +403,22 @@ async function showHistory(): Promise<void> {
     fileInput.value = '';
   });
   const list = app.querySelector<HTMLElement>('#h-list')!;
+  const summary = app.querySelector<HTMLElement>('#h-summary')!;
   if (sessions.length === 0) {
+    summary.innerHTML = '';
     list.innerHTML = '<p class="empty">还没有记录。大年初一，出发！</p>';
   } else {
     list.innerHTML = sessions
-      .map((s) => `<button class="history-item" data-id="${s.id}">${s.date} · 计算中…</button>`)
+      .map((s) => `<button class="history-item" data-id="${s.id}">${escHtml(s.date)} · 计算中…</button>`)
       .join('');
-    sessions.forEach((s) => {
-      void statFor(s).then((stat) => {
+    void Promise.all(
+      sessions.map(async (s) => ({ s, stat: await statFor(s) })),
+    ).then((rows) => {
+      rows.forEach(({ s, stat }) => {
         const el = list.querySelector<HTMLElement>(`[data-id="${s.id}"]`);
         if (el) el.textContent = `${s.date} · ${stat}`;
       });
+      renderYearSummary(summary, rows); // P15：历年成绩单 + 绕路率趋势线
     });
   }
   list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {
@@ -360,6 +427,55 @@ async function showHistory(): Promise<void> {
       if (sess) showReview(sess);
     });
   });
+}
+
+/** P15/F-15：历年成绩单卡片 + 绕路率逐年趋势线（按年聚合，不混数据） */
+function renderYearSummary(
+  el: HTMLElement,
+  rows: { s: SessionData; stat: string }[],
+): void {
+  const byYear = new Map<number, { n: number; km: number; sumPct: number }>();
+  for (const { s, stat } of rows) {
+    const m = /(\d+\.\d+) km .*绕路率 (\d+)%/.exec(stat);
+    const km = m ? parseFloat(m[1]) : 0;
+    const pct = m ? parseInt(m[2], 10) : 0;
+    const cur = byYear.get(s.year) ?? { n: 0, km: 0, sumPct: 0 };
+    cur.n += 1;
+    cur.km += km;
+    cur.sumPct += pct;
+    byYear.set(s.year, cur);
+  }
+  const years = [...byYear.keys()].sort((a, b) => a - b);
+  const cards = years
+    .map((y) => {
+      const v = byYear.get(y)!;
+      return `<div class="year-card"><b>${y} 年</b><span>${v.n} 场 · ${v.km.toFixed(2)} km · 平均绕路率 ${Math.round(v.sumPct / v.n)}%</span></div>`;
+    })
+    .join('');
+  let chart = '';
+  if (years.length >= 2) {
+    const cw = 300;
+    const ch = 60;
+    const pad = 8;
+    const pts = years.map((y) => {
+      const v = byYear.get(y)!;
+      const avg = v.sumPct / v.n;
+      const x = pad + ((y - years[0]) / Math.max(1, years[years.length - 1] - years[0])) * (cw - pad * 2);
+      const yc = ch - pad - (Math.min(100, avg) / 100) * (ch - pad * 2);
+      return { x, y: yc, avg };
+    });
+    const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    const dots = pts
+      .map(
+        (p) =>
+          `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#c8402f"/>` +
+          `<text x="${p.x.toFixed(1)}" y="${(p.y - 6).toFixed(1)}" text-anchor="middle" font-size="8" fill="#5a3a2a">${Math.round(p.avg)}%</text>`,
+      )
+      .join('');
+    chart = `<div class="trend"><span class="trend-title">绕路率趋势（逐年平均）</span>` +
+      `<svg viewBox="0 0 ${cw} ${ch}">${dots}<path d="${line}" fill="none" stroke="#c8402f" stroke-width="2" stroke-linecap="round"/></svg></div>`;
+  }
+  el.innerHTML = cards + chart;
 }
 
 /** 会话统计（D22.1 Worker 化 + P26 内存缓存：同一会话多次进历史不重算） */
@@ -385,11 +501,13 @@ async function boot(): Promise<void> {
   try {
     const ck = await loadActive();
     if (ck && !ck.session.finished) {
-      const resume = ui.confirm('检测到未完成的拜年记录，继续吗？（取消=放弃）');
+      // P17：§7.8 规范对话框（标题/正文/继续/放弃）
+      const resume = await confirmDialog('检测到未完成的拜年记录', '继续记录，还是放弃？', '继续', '放弃');
       if (resume) {
         recorder = RecorderState.restore(ck);
         if (recorder.state === 'WALKING') {
           gps.start({ onFix, onError: handleGpsError });
+          void requestWakeLock(); // P7：恢复续录同样保亮屏
         }
         syncMap();
         ui.toast('已恢复未完成的记录');
@@ -399,8 +517,49 @@ async function boot(): Promise<void> {
     }
   } catch (e) {
     console.warn('[db]', e);
+    // P25：检查点损坏 → 明确提示而非静默
+    try {
+      ui.toast('上次未完成的记录读取失败，已忽略（可重新开始记录）');
+    } catch {
+      /* 无 toast 元素则忽略 */
+    }
   }
 }
+
+/** P17：应用内确认对话框（替代 window.confirm，§7.8 文案规范） */
+function confirmDialog(title: string, body: string, okLabel: string, cancelLabel: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'dlg-overlay';
+    const el = document.createElement('div');
+    el.className = 'dlg';
+    const h = document.createElement('h3');
+    h.textContent = title;
+    const p = document.createElement('p');
+    p.textContent = body;
+    const actions = document.createElement('div');
+    actions.className = 'dlg-actions';
+    const ok = document.createElement('button');
+    ok.className = 'primary small';
+    ok.textContent = okLabel;
+    const cancel = document.createElement('button');
+    cancel.className = 'ghost small';
+    cancel.textContent = cancelLabel;
+    actions.append(ok, cancel);
+    el.append(h, p, actions);
+    overlay.appendChild(el);
+    const done = (v: boolean): void => {
+      overlay.remove();
+      resolve(v);
+    };
+    ok.addEventListener('click', () => done(true));
+    cancel.addEventListener('click', () => done(false));
+    app.appendChild(overlay);
+  });
+}
+
+// 契约常量（数据格式 §9）：检查点落盘间隔 10s（P22 去魔法数字）
+const CHECKPOINT_MS = 10_000;
 
 setInterval(() => {
   if (view === 'record') {
@@ -410,9 +569,16 @@ setInterval(() => {
     });
   }
 }, 1000);
-setInterval(flush, 10_000); // D22：每 10s 检查点落盘
+setInterval(flush, CHECKPOINT_MS); // D22：每 10s 检查点落盘
 ui.render(null, 0);
 void boot();
+
+// P7：页面切后台/锁屏会释放 Wake Lock，回到前台且记录中时重新请求
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && recorder) {
+    void requestWakeLock();
+  }
+});
 
 // PWA 离线：仅生产环境注册（开发环境不缓存，避免 HMR 污染）
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
@@ -422,6 +588,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       .catch((e) => console.warn('[sw]', e));
   });
 }
+
+// 地图折叠/展开后重算 Leaflet 尺寸（P5）
+window.addEventListener('baibai-map-resize', () => {
+  mapCtrl?.invalidateSize?.();
+});
 
 // D22.5 全局错误边界：未捕获异常写日志 + 提示，绝不静默冻结（P3）
 function reportUncaught(kind: string, detail: string): void {

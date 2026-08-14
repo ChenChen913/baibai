@@ -188,7 +188,8 @@ fun PlanScreen(year: Int, onBack: () -> Unit) {
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    if (changed) "改名" else "已改",
+                                    // L-1：§7.6 要求「改名」（未变置灰），不用「已改」
+                                    "改名",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Black,
                                     color = if (changed) Color.White else BaibaiInk.copy(alpha = 0.4f),
@@ -232,14 +233,15 @@ fun PlanScreen(year: Int, onBack: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (prev != null) {
+                // L-2：无历史数据时仅「取消」（§7.8）
+                if (prev != null) {
+                    TextButton(
+                        onClick = {
                             persist(PlanOps.planFromSession(prev, year))
-                        }
-                        showImportConfirm = false
-                    },
-                ) { Text("导入") }
+                            showImportConfirm = false
+                        },
+                    ) { Text("导入") }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showImportConfirm = false }) { Text("取消") }

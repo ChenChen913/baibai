@@ -232,7 +232,10 @@ fun AppRoot() {
     finishTooFar?.let { dist ->
         AlertDialog(
             onDismissRequest = { RecorderHub.dismissFinishTooFar() },
-            title = { Text("距 Home 约 ${dist.roundToInt()} 米") },
+            title = {
+                // M-10：无定位时不显示 Infinity
+                Text(if (dist.isFinite()) "距 Home 约 ${dist.roundToInt()} 米" else "当前位置无法定位")
+            },
             text = { Text("当前位置离出发点较远，仍要结束本次拜年吗？") },
             confirmButton = {
                 TextButton(

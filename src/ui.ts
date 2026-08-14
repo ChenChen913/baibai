@@ -13,6 +13,7 @@ export interface UiCallbacks {
   onExport(): void;
   onHistory(): void;
   onPlan(): void;
+  onFeedbackToggle(): void;
 }
 
 export interface Ui {
@@ -23,6 +24,7 @@ export interface Ui {
   ): void;
   toast(msg: string): void;
   confirm(msg: string): boolean;
+  setFeedbackOn(on: boolean): void;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -46,6 +48,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       <header class="top">
         <div class="brand"><span class="brand-mark">🧧</span>拜拜<span class="brand-sub">拜年轨迹复盘</span></div>
         <div class="year-chip">大年初一</div>
+        <button id="btn-feedback" class="sound-toggle" aria-label="关闭提示音与震动">${ICONS.bell}</button>
       </header>
       <div class="stat-card">
         <div class="status" id="status">待机</div>
@@ -56,25 +59,31 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
           <div class="stat"><b id="stat-time">00:00:00</b><span>本次用时</span></div>
         </div>
       </div>
-      <div class="map-card">
+      <div class="map-card" id="map-card">
+        <div class="map-head">
+          <span class="map-title">实时地图</span>
+          <button id="map-toggle" class="map-toggle" aria-label="收起地图">${ICONS.chevron}</button>
+        </div>
         <div id="map"></div>
         <div class="map-cap">实时地图 · © OpenStreetMap · 断网自动降级示意模式</div>
       </div>
-      <div class="primary-zone">
-        <button id="btn-start" class="primary">开始拜年</button>
-        <button id="btn-pause" class="primary">到一户了 · 暂停</button>
-        <button id="btn-resume" class="primary">继续出发</button>
-        <button id="btn-finish" class="primary danger">结束拜年</button>
-        <div class="side-zone">
-          <button id="btn-undo" class="ghost">撤销</button>
-          <button id="btn-export" class="ghost">导出数据</button>
+      <div class="bottom-dock">
+        <div class="primary-zone">
+          <button id="btn-start" class="primary">开始拜年</button>
+          <button id="btn-pause" class="primary">到一户了 · 暂停</button>
+          <button id="btn-resume" class="primary">继续出发</button>
+          <div class="side-zone">
+            <button id="btn-undo" class="ghost">撤销</button>
+            <button id="btn-finish" class="ghost danger-text">结束拜年</button>
+            <button id="btn-export" class="ghost">导出数据</button>
+          </div>
         </div>
-      </div>
-      <div class="toolbar">
-        <button id="btn-walk" class="ghost">${ICONS.walk}<span>走路</span></button>
-        <button id="btn-bike" class="ghost">${ICONS.bike}<span>骑车</span></button>
-        <button id="btn-plan" class="ghost">${ICONS.plan}<span>清单</span></button>
-        <button id="btn-history" class="ghost">${ICONS.history}<span>历史</span></button>
+        <div class="toolbar">
+          <button id="btn-walk" class="ghost">${ICONS.walk}<span>走路</span></button>
+          <button id="btn-bike" class="ghost">${ICONS.bike}<span>骑车</span></button>
+          <button id="btn-plan" class="ghost">${ICONS.plan}<span>清单</span></button>
+          <button id="btn-history" class="ghost">${ICONS.history}<span>历史</span></button>
+        </div>
       </div>
     </div>
     <div id="toast"></div>
@@ -91,6 +100,26 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   $('btn-bike').addEventListener('click', () => cb.onMode('bike'));
   $('btn-plan').addEventListener('click', () => cb.onPlan());
   $('btn-history').addEventListener('click', () => cb.onHistory());
+  $('btn-feedback').addEventListener('click', () => cb.onFeedbackToggle());
+
+  function setFeedbackOn(on: boolean): void {
+    const btn = $('btn-feedback');
+    btn.classList.toggle('off', !on);
+    btn.setAttribute('aria-label', on ? '关闭提示音与震动' : '开启提示音与震动');
+  }
+
+  // 地图折叠/展开（P5）：折叠为 40dp 标题条，180ms 高度过渡；展开后通知地图重算尺寸
+  let mapOpen = true;
+  $('map-toggle').addEventListener('click', () => {
+    mapOpen = !mapOpen;
+    $('map-card').classList.toggle('collapsed', !mapOpen);
+    const btn = $('map-toggle');
+    btn.classList.toggle('open', mapOpen);
+    btn.setAttribute('aria-label', mapOpen ? '收起地图' : '展开地图');
+    if (mapOpen) {
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent('baibai-map-resize')), 200);
+    }
+  });
 
   let toastTimer: number | undefined;
 
@@ -124,7 +153,8 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
         ? '正在获取定位，请允许浏览器定位权限…'
         : '从家门口出发，按「开始拜年」';
     }
-    $('stat-count').textContent = String(s?.visits.length ?? 0);
+    // 拜访户数 = 唯一户数（nodes 不含 home；P9：中途回家/回访不虚高）
+    $('stat-count').textContent = String(s?.nodes.length ?? 0);
     $('stat-time').textContent = fmt(elapsedMs);
     $('btn-start').style.display = st === 'IDLE' ? '' : 'none';
     $('btn-pause').style.display = st === 'WALKING' ? '' : 'none';
@@ -140,5 +170,5 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     $('btn-bike').classList.toggle('active', s?.currentMode === 'bike');
   }
 
-  return { render, toast, confirm: (m: string) => window.confirm(m) };
+  return { render, toast, confirm: (m: string) => window.confirm(m), setFeedbackOn };
 }

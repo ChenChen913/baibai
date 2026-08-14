@@ -84,7 +84,8 @@ export function mountPlanView(root: HTMLElement, year: number, deps: PlanDeps): 
     const sessions = (await deps.listSessions()).sort(
       (a, b) => b.createdAt - a.createdAt,
     );
-    const prev = sessions.find((x) => x.year < year) ?? sessions[0];
+    // P16：只取真正的往年记录；无往年记录时不得拿当年自己的记录冒充"去年"
+    const prev = sessions.find((x) => x.year < year);
     if (!prev) {
       window.alert('还没有历史拜年记录，无法导入');
       return;

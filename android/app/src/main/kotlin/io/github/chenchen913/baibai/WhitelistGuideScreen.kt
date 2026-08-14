@@ -22,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,6 +64,7 @@ fun WhitelistGuideScreen(onDone: () -> Unit) {
 
                 Spacer(Modifier.height(40.dp))
 
+                // §7.2：五张厂商卡片
                 BrandCard(
                     brand = "小米 / 红米",
                     lines = listOf("设置 → 应用设置 → 拜拜 → 省电策略 → 无限制；并开启「自启动」"),
@@ -77,18 +77,23 @@ fun WhitelistGuideScreen(onDone: () -> Unit) {
                     chevron = true,
                 )
                 Spacer(Modifier.height(12.dp))
-                // 设计稿第三张卡：OPPO / vivo / 三星 合并，整体 60% 透明度
-                Column(Modifier.alpha(0.6f)) {
-                    BrandCard(
-                        brand = "OPPO / vivo / 三星",
-                        lines = listOf(
-                            "OPPO/一加：设置 → 电池 → 更多设置 → 拜拜 → 允许后台运行",
-                            "vivo/iQOO：i管家 → 电池 → 后台耗电管理 → 拜拜 → 允许后台高耗电",
-                            "三星：设置 → 电池 → 后台使用限制 → 拜拜 → 不休眠",
-                        ),
-                        chevron = false,
-                    )
-                }
+                BrandCard(
+                    brand = "OPPO / 一加",
+                    lines = listOf("设置 → 电池 → 更多设置 → 拜拜 → 允许后台运行；应用管理里开自启动"),
+                    chevron = true,
+                )
+                Spacer(Modifier.height(12.dp))
+                BrandCard(
+                    brand = "vivo / iQOO",
+                    lines = listOf("i管家 → 电池 → 后台耗电管理 → 拜拜 → 允许后台高耗电"),
+                    chevron = true,
+                )
+                Spacer(Modifier.height(12.dp))
+                BrandCard(
+                    brand = "三星",
+                    lines = listOf("设置 → 电池 → 后台使用限制 → 拜拜 → 不休眠"),
+                    chevron = false,
+                )
                 Spacer(Modifier.height(24.dp))
             }
 

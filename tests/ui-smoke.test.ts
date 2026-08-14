@@ -28,6 +28,7 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
       onExport: vi.fn(),
       onHistory: vi.fn(),
       onPlan: vi.fn(),
+      onFeedbackToggle: vi.fn(),
     };
     const ui = mountUi(makeRoot(), cb);
     const click = (id: string) => {
@@ -69,6 +70,7 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
       onExport: () => {},
       onHistory: () => {},
       onPlan: () => {},
+      onFeedbackToggle: () => {},
     });
     const walk = () => document.querySelector<HTMLButtonElement>('#btn-walk')!;
     const bike = () => document.querySelector<HTMLButtonElement>('#btn-bike')!;

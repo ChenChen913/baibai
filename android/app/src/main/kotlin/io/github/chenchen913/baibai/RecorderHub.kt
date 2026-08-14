@@ -2,6 +2,8 @@ package io.github.chenchen913.baibai
 
 import android.app.Application
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -50,6 +52,10 @@ object RecorderHub {
     private val _finishTooFar = MutableStateFlow<Double?>(null)
     val finishTooFar: StateFlow<Double?> = _finishTooFar
 
+    // P6/D19 R3：震动 + 提示音（默认开启，可关）
+    private val _feedbackOn = MutableStateFlow(true)
+    val feedbackOn: StateFlow<Boolean> = _feedbackOn
+
     lateinit var store: JsonStore
         private set
     var source: LocationSource? = null // 测试可注入 FakeSource
@@ -60,12 +66,16 @@ object RecorderHub {
     private var context: Context? = null
     private var watchdogJob: Job? = null
     private var flushTimerStarted = false
+    private var lastSessionEmit = 0L // M-5：定位 fix 的 session 快照节流（5s）
 
     fun init(app: Application) {
         if (this::store.isInitialized) return
         context = app.applicationContext
         store = JsonStore(app.filesDir)
         source = SystemLocationSource(app.applicationContext)
+        _feedbackOn.value = app.applicationContext
+            .getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
+            .getBoolean("feedback_on", true)
         // D22：每 10s 检查点落盘
         if (!flushTimerStarted) {
             flushTimerStarted = true
@@ -76,6 +86,13 @@ object RecorderHub {
                 }
             }
         }
+    }
+
+    /** P6：切换震动/提示音开关 */
+    fun setFeedback(on: Boolean) {
+        _feedbackOn.value = on
+        context?.getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("feedback_on", on)?.apply()
     }
 
     /** 启动检查：发现未完成检查点 → 弹"继续/放弃"。H-2：已在记录的进程内（如旋转重建）不再重复弹窗 */
@@ -142,6 +159,7 @@ object RecorderHub {
         _waiting.value = true
         ensureSourceRunning()
         vibrate()
+        beep()
         emit("正在获取定位…")
         watchdogJob?.cancel()
         watchdogJob = scope.launch {
@@ -158,9 +176,10 @@ object RecorderHub {
             r.pause(source?.recent(3) ?: emptyList(), nowMs())
             stopLocationSource() // SPEC §7：PAUSED 停定位（省电 + 防屋内漂移）
             vibrate()
+            beep()
             flushNow()
             _session.value = r.snapshot()
-        } catch (e: IllegalStateException) {
+        } catch (e: Exception) { // M-7：除非法状态外，无定位/空 visits 等也不崩溃
             emit(e.message ?: "操作失败")
         }
     }
@@ -171,9 +190,10 @@ object RecorderHub {
             r.resume(nowMs())
             ensureSourceRunning()
             vibrate()
+            beep()
             flushNow()
             _session.value = r.snapshot()
-        } catch (e: IllegalStateException) {
+        } catch (e: Exception) { // M-7
             emit(e.message ?: "操作失败") // 双击等非法转移不再崩溃
         }
     }
@@ -209,6 +229,7 @@ object RecorderHub {
                 _waiting.value = false
                 watchdogJob?.cancel()
                 vibrate()
+                beep()
                 _session.value = saved
                 emit("已保存本次拜年 🎉")
             } else {
@@ -265,8 +286,13 @@ object RecorderHub {
         }
         if (r != null) {
             try {
-                r.addPoint(f.pos, f.acc, nowMs())
-                _session.value = r.snapshot()
+                val t = nowMs()
+                r.addPoint(f.pos, f.acc, t)
+                // M-5：每秒 fix 不再整树重组——session 快照节流到 5s（状态/户数变化由各动作单独发射）
+                if (t - lastSessionEmit >= 5000) {
+                    lastSessionEmit = t
+                    _session.value = r.snapshot()
+                }
             } catch (_: IllegalStateException) {
                 /* 非 WALKING 状态，忽略 */
             }
@@ -313,6 +339,7 @@ object RecorderHub {
     }
 
     private fun vibrate() {
+        if (!_feedbackOn.value) return
         val c = context ?: return
         runCatching {
             if (Build.VERSION.SDK_INT >= 31) {
@@ -324,6 +351,19 @@ object RecorderHub {
                 @Suppress("DEPRECATION")
                 val v = c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 v.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        }
+    }
+
+    /** P6：轻提示音（50ms 短哔，跟随开关） */
+    private fun beep() {
+        if (!_feedbackOn.value) return
+        runCatching {
+            val tg = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60)
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 50)
+            scope.launch {
+                delay(150)
+                runCatching { tg.release() }
             }
         }
     }

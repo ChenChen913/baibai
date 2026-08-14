@@ -16,6 +16,9 @@ export interface PlaybackPlan {
   totalMs: number;
 }
 
+/** 契约常量（数据格式 §9）：Douglas-Peucker 抽稀容差 2m */
+export const DP_EPS_M = 2;
+
 /** 会话 → 回放计划：各边平滑点合并 → DP 抽稀（保留时间轴）→ 投影视口 */
 export function buildPlan(s: SessionData, w: number, h: number): PlaybackPlan {
   const edges = buildEdges(s);
@@ -26,7 +29,7 @@ export function buildPlan(s: SessionData, w: number, h: number): PlaybackPlan {
   if (raw.length === 0) return { pts: [], totalMs: 0 };
   const keep = douglasPeuckerKeep(
     raw.map((r) => r.pos),
-    2,
+    DP_EPS_M,
   );
   const proj = projectToView(
     keep.map((i) => raw[i].pos),

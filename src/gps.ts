@@ -73,5 +73,7 @@ export class GpsTracker {
       navigator.geolocation.clearWatch(this.watchId);
     }
     this.watchId = null;
+    // P19：停止时清空缓冲，避免恢复后 immediate pause 混入暂停前的旧点
+    this.buffer = [];
   }
 }

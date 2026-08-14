@@ -69,7 +69,7 @@ MainActivity (Compose 单 Activity)
 | `src/plan.ts` | `Plan.kt` | 清单生成 / 漏访一对一匹配 / 套名候选 |
 | `src/review.ts` | `Review.kt` | 改名/合并/拆分/剔除异常点 |
 | `src/playback.ts` | `Playback.kt` | 回放计划与插值 |
-| `src/demo.ts` | `Demo.kt` | 演示数据生成器（含昌乐县 15/20 户仿真） |
+| `src/demo.ts` | `Demo.kt` | 演示数据生成器（UI 演示用 8 户；昌乐县 15/20 户仿真在 `VillageSimTest.kt` 测试中，L-6 修正） |
 | `src/db.ts` | `JsonStore.kt` | 检查点/会话/清单 JSON 读写 + 全量导出导入 |
 | `src/gps.ts` | `LocationService.kt` | 高德定位回调、最近 fix 环形缓冲、错误分类提示 |
 | `src/ui.ts` 等 4 个视图 | Compose 五个 Screen + `UiTheme.kt` | 驾驶舱布局/回顾/三线/清单/历史 + 暖色年味主题 + SVG 图标 → Vector Drawable |

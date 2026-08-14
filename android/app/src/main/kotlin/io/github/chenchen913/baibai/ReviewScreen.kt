@@ -332,7 +332,8 @@ fun ReviewScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    if (nameText != n.name) "改名" else "已改",
+                                    // L-1：§7.4 要求「改名」（未变置灰），不用「已改」
+                                    "改名",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Black,
                                     color = if (nameText != n.name) Color.White else BaibaiInk.copy(alpha = 0.4f),

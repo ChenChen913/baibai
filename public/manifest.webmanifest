@@ -2,9 +2,11 @@
   "name": "拜拜 · 乡村拜年轨迹复盘",
   "short_name": "拜拜",
   "description": "大年初一走村串户，记录轨迹、复盘最优拜年路线",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#fff7ec",
   "theme_color": "#c8402f",
   "icons": [

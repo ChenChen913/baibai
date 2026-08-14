@@ -24,6 +24,9 @@ const fmtKm = (m: number): string => `${(m / 1000).toFixed(2)} km`;
 const fmtMin = (sec: number): string =>
   `${Math.floor(sec / 60)} 分 ${Math.round(sec % 60)} 秒`;
 const fmtPct = (p: number): string => `${p.toFixed(0)}%`;
+// P11：标题等插入 innerHTML 的外部数据一律转义
+const esc = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export interface OptimizeDeps {
   onBack(): void;
@@ -50,7 +53,7 @@ export function mountOptimizeView(
     <div class="wrap">
       <div class="bar">
         <button id="opt-back" class="secondary small">← 复盘</button>
-        <div class="bar-title">${s.date} · 三线对比</div>
+        <div class="bar-title">${esc(s.date)} · 三线对比</div>
       </div>
       <div class="cards" id="opt-cards"></div>
       <div class="canvas-box">

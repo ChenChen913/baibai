@@ -130,6 +130,7 @@ button:disabled {
   box-shadow: none;
   font-size: 14px;
   padding: 9px 14px;
+  min-height: 44px; /* P21：触控热区 ≥48dp 方向（web 按 44px 底线） */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -170,6 +171,118 @@ button:disabled {
   color: var(--ink);
   opacity: 0.55;
   margin: 8px 2px 14px;
+}
+
+/* 历年成绩单 + 趋势线（F-15） */
+.h-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.year-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.year-card b {
+  font-size: 15px;
+}
+
+.trend {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px 12px;
+}
+
+.trend-title {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.trend svg {
+  width: 100%;
+  height: auto;
+}
+
+/* 提示音/震动开关（P6） */
+.sound-toggle {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+
+.sound-toggle .icon {
+  margin: 0;
+}
+
+.sound-toggle.off {
+  color: var(--ink-soft);
+  opacity: 0.55;
+}
+
+/* 应用内确认对话框（§7.8） */
+.dlg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(90, 58, 42, 0.35);
+  padding: 24px;
+}
+
+.dlg {
+  width: 100%;
+  max-width: 340px;
+  background: #fff;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 18px 48px rgba(90, 58, 42, 0.28);
+}
+
+.dlg h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.dlg p {
+  font-size: 14px;
+  color: var(--ink-soft);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.dlg-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.dlg-actions .primary.small,
+.dlg-actions .ghost.small {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 14px;
+  letter-spacing: 0;
+  min-height: 44px;
 }
 
 #toast {
@@ -295,8 +408,55 @@ button:disabled {
   background: #f3ead9;
 }
 
+/* 地图标题条 + 折叠按钮（P5） */
+.map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 8px 0 16px;
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid var(--line);
+}
+
+.map-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.map-toggle {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--ink);
+}
+
+.map-toggle .icon {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  transition: transform 0.18s ease;
+}
+
+.map-toggle.open .icon {
+  transform: rotate(180deg);
+}
+
 .map-card #map {
   height: 250px;
+  transition: height 0.18s ease-out;
+}
+
+.map-card.collapsed #map {
+  height: 0;
+}
+
+.map-card.collapsed .map-cap {
+  display: none;
 }
 
 .map-cap {
@@ -332,6 +492,16 @@ button:disabled {
   font-size: 13px;
 }
 
+/* 底部固定区：主按钮 + 工具条 始终在拇指热区（P14） */
+.bottom-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 0 -18px -96px;
+  padding: 10px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(transparent, rgba(255, 248, 238, 0.94) 22%);
+}
+
 .primary-zone {
   display: flex;
   flex-direction: column;
@@ -343,10 +513,18 @@ button:disabled {
   display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .side-zone .ghost {
-  padding: 9px 22px;
+  padding: 10px 20px;
+  min-height: 44px;
+}
+
+.side-zone .ghost.danger-text {
+  color: var(--accent-deep);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  font-weight: 700;
 }
 
 .toolbar {
@@ -362,7 +540,8 @@ button:disabled {
   flex: 1;
   border: 0;
   background: transparent;
-  padding: 10px 6px;
+  padding: 8px 6px;
+  min-height: 48px; /* P21：工具条触控热区 */
 }
 
 .toolbar .ghost.active {
