@@ -5,7 +5,7 @@ import L from 'leaflet';
 import { wgs2gcj } from './wgs2gcj.js';
 
 export interface MapController {
-  /** 跟随当前位置（自车标记 + 精度圈 + 当前段实时增长） */
+  /** 跟随当前位置（自车标记 + 精度圈 + 动画平滑跟随） */
   follow(lat: number, lng: number, accM?: number): void;
   /** 整条轨迹线（分段：走过淡红、当前段实红粗线，像导航一样） */
   setTrack(pts: { lat: number; lng: number }[], breaks?: number[]): void;
@@ -14,7 +14,15 @@ export interface MapController {
     home: { lat: number; lng: number },
     nodes: { id: string; name: string; autoNo: number; pos: { lat: number; lng: number } }[],
   ): void;
-  /** 容器尺寸变化后重算（地图折叠/展开后调用） */
+  /** 定位回中 */
+  recenter(): void;
+  /** 适应全轨迹视野 */
+  fitBounds(): void;
+  /** 切换图层（街道 / 卫星） */
+  switchTileLayer(to?: 'street' | 'sat'): 'street' | 'sat';
+  /** 高亮/飞往某户 */
+  focusNode(no: number | string): void;
+  /** 容器尺寸变化后重算（抽屉展开/折叠后调用） */
   invalidateSize(): void;
   destroy(): void;
 }
@@ -24,10 +32,10 @@ export function mountMap(
   initial: { lat: number; lng: number } | null,
 ): MapController {
   const map = L.map(el, {
-    zoomControl: false, // 设计稿规范：手机用双指缩放，不显示会遮挡画面的 +/- 控件
-    attributionControl: false, // 版权注由地图卡底部一行展示
-    center: initial ? [initial.lat, initial.lng] : [36.71, 119.1], // 默认潍坊附近
-    zoom: initial ? 16 : 13,
+    zoomControl: false, // 手机双指缩放，不显示遮挡画面的 +/- 控件
+    attributionControl: false, // 版权注由地图卡或面板展示
+    center: initial ? [initial.lat, initial.lng] : [36.7095, 118.9118], // 默认潍坊昌乐附近
+    zoom: initial ? 16 : 14,
   });
 
   /* ---------- 图层：普通地图（高德 → OSM 兜底）+ 卫星（高德） ---------- */
@@ -72,54 +80,6 @@ export function mountMap(
   makeStreet();
   makeSat();
 
-  // 图层切换与回正悬浮控制组（注入地图容器右上角）
-  const sw = document.createElement('div');
-  sw.className = 'baibai-layer-switch';
-
-  const btnRecenter = document.createElement('button');
-  btnRecenter.className = 'map-ctrl-btn recenter-btn';
-  btnRecenter.innerHTML = '<span class="ctrl-icon">🎯</span><span>回正</span>';
-  btnRecenter.title = '回正并跟随当前位置';
-
-  const btnStreet = document.createElement('button');
-  btnStreet.textContent = '街道';
-  btnStreet.className = 'on';
-
-  const btnSat = document.createElement('button');
-  btnSat.textContent = '卫星';
-
-  sw.append(btnRecenter, btnStreet, btnSat);
-  el.appendChild(sw);
-
-  let lastPos: [number, number] | null = initial ? [initial.lat, initial.lng] : null;
-
-  btnRecenter.addEventListener('click', () => {
-    if (lastPos) {
-      map.setView(cvt(lastPos), Math.max(map.getZoom(), 16), { animate: true });
-    }
-  });
-
-  const syncButtons = (): void => {
-    btnStreet.classList.toggle('on', curLayer === 'street');
-    btnSat.classList.toggle('on', curLayer === 'sat');
-    const modeTag = document.querySelector<HTMLElement>('#map-mode-tag');
-    if (modeTag) {
-      modeTag.textContent = curLayer === 'street' ? '街道' : '卫星';
-    }
-  };
-  btnStreet.addEventListener('click', () => {
-    if (sat && map.hasLayer(sat)) map.removeLayer(sat);
-    if (street) street.addTo(map);
-    curLayer = 'street';
-    syncButtons();
-  });
-  btnSat.addEventListener('click', () => {
-    if (street && map.hasLayer(street)) map.removeLayer(street);
-    if (sat) sat.addTo(map);
-    curLayer = 'sat';
-    syncButtons();
-  });
-
   const cvt = (p: [number, number]): [number, number] =>
     useGcj ? wgs2gcj(p[0], p[1]) : p;
 
@@ -140,28 +100,37 @@ export function mountMap(
       L.polyline(pts, {
         color: '#c8402f',
         weight: isCurrent ? 5 : 4,
-        opacity: isCurrent ? 0.95 : 0.35,
+        opacity: isCurrent ? 0.95 : 0.45,
+        lineCap: 'round',
         lineJoin: 'round',
       }).addTo(segGroup);
     }
   }
 
-  /* ---------- 当前位置 + 精度圈 ---------- */
-  let me: L.CircleMarker | null = null;
+  /* ---------- 当前位置 + 精度圈 + 呼吸脉冲圈 ---------- */
+  let meMarker: L.Marker | null = null;
   let accCircle: L.Circle | null = null;
+  let lastPos: [number, number] | null = initial ? [initial.lat, initial.lng] : null;
+
   function drawMe(lat: number, lng: number, accM?: number): void {
     const c = cvt([lat, lng]);
-    if (!me) {
-      me = L.circleMarker(c, {
-        radius: 9,
-        color: '#ffffff',
-        weight: 2.5,
-        fillColor: '#c8402f',
-        fillOpacity: 1,
-      }).addTo(map);
+    if (!meMarker) {
+      const liveIcon = L.divIcon({
+        className: 'baibai-me-pin-wrap',
+        html: `
+          <div class="relative w-8 h-8 flex items-center justify-center pointer-events-none">
+            <div class="absolute w-8 h-8 bg-red-500 rounded-full opacity-40 pulse-dot"></div>
+            <div class="w-4 h-4 bg-red-600 border-2 border-white rounded-full shadow-lg"></div>
+          </div>
+        `,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+      meMarker = L.marker(c, { icon: liveIcon, zIndexOffset: 500 }).addTo(map);
     } else {
-      me.setLatLng(c);
+      meMarker.setLatLng(c);
     }
+
     if (accCircle) {
       accCircle.remove();
       accCircle = null;
@@ -172,7 +141,7 @@ export function mountMap(
         color: '#c8402f',
         weight: 1,
         fillColor: '#c8402f',
-        fillOpacity: 0.07,
+        fillOpacity: 0.08,
         interactive: false,
       }).addTo(map);
     }
@@ -186,34 +155,48 @@ export function mountMap(
   function drawNodes(): void {
     const layer = L.layerGroup();
     if (rawHome && (rawHome.lat !== 0 || rawHome.lng !== 0)) {
-      L.marker(cvt([rawHome.lat, rawHome.lng]), {
-        icon: L.divIcon({
-          className: 'baibai-home-icon',
-          html: '<div class="home-pin">家</div>',
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-        }),
-        zIndexOffset: 200,
-      }).addTo(layer);
-    }
-    for (const n of rawNodes) {
-      const m = L.marker(cvt([n.pos.lat, n.pos.lng]), {
-        icon: L.divIcon({
-          className: 'baibai-node-icon',
-          html: '<div class="node-pin">' + n.autoNo + '</div>',
-          iconSize: [26, 26],
-          iconAnchor: [13, 13],
-        }),
-        zIndexOffset: 150,
+      const homeIcon = L.divIcon({
+        className: 'baibai-home-icon',
+        html: `
+          <div class="w-7 h-7 bg-amber-500 border-2 border-white rounded-full flex items-center justify-center text-white text-[11px] font-black shadow-md">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
-      // P11：户名为用户数据，用 textContent 容器防 XSS
-      if (n.name) {
-        const label = document.createElement('div');
-        label.textContent = n.name;
-        m.bindTooltip(label, { direction: 'top', offset: [0, -14] });
-      }
+      L.marker(cvt([rawHome.lat, rawHome.lng]), {
+        icon: homeIcon,
+        zIndexOffset: 300,
+      }).addTo(layer).bindPopup('起点：自家庭院');
+    }
+
+    for (const n of rawNodes) {
+      const isLatest = rawNodes.length > 0 && n.autoNo === rawNodes[rawNodes.length - 1].autoNo;
+      const nodeIcon = L.divIcon({
+        className: 'baibai-node-icon',
+        html: isLatest
+          ? `<div class="relative w-8 h-8 flex items-center justify-center">
+              <div class="absolute w-8 h-8 bg-red-500 rounded-full opacity-40 pulse-dot"></div>
+              <div class="w-6 h-6 bg-red-600 border-2 border-white rounded-full shadow-lg flex items-center justify-center text-white text-[10px] font-black">${n.autoNo}</div>
+            </div>`
+          : `<div class="w-5 h-5 bg-white border-2 border-[#C8402F] rounded-full flex items-center justify-center text-[#C8402F] text-[10px] font-black shadow-sm">${n.autoNo}</div>`,
+        iconSize: isLatest ? [32, 32] : [22, 22],
+        iconAnchor: isLatest ? [16, 16] : [11, 11],
+      });
+
+      const m = L.marker(cvt([n.pos.lat, n.pos.lng]), {
+        icon: nodeIcon,
+        zIndexOffset: isLatest ? 350 : 200,
+      });
+
+      const label = document.createElement('div');
+      label.className = 'text-xs font-bold text-stone-800';
+      label.textContent = `${n.autoNo}. ${n.name || '拜访点'}`;
+      m.bindTooltip(label, { direction: 'top', offset: [0, -12] });
       layer.addLayer(m);
     }
+
     nodeLayer.remove();
     nodeLayer = layer.addTo(map);
   }
@@ -252,6 +235,58 @@ export function mountMap(
     drawNodes();
   }
 
+  function recenter(): void {
+    if (lastPos) {
+      map.flyTo(cvt(lastPos), Math.max(map.getZoom(), 16), { animate: true, duration: 0.8 });
+    } else if (rawHome && (rawHome.lat !== 0 || rawHome.lng !== 0)) {
+      map.flyTo(cvt([rawHome.lat, rawHome.lng]), 16, { animate: true, duration: 0.8 });
+    }
+  }
+
+  function fitBounds(): void {
+    const ptsToFit: [number, number][] = [];
+    if (trackPts.length > 0) ptsToFit.push(...trackPts);
+    if (rawHome && (rawHome.lat !== 0 || rawHome.lng !== 0)) ptsToFit.push([rawHome.lat, rawHome.lng]);
+    rawNodes.forEach((n) => ptsToFit.push([n.pos.lat, n.pos.lng]));
+
+    if (ptsToFit.length > 1) {
+      const bounds = L.latLngBounds(ptsToFit.map((p) => cvt(p)));
+      map.flyToBounds(bounds, { padding: [60, 60], animate: true, duration: 0.8 });
+    } else if (ptsToFit.length === 1) {
+      map.flyTo(cvt(ptsToFit[0]), 16, { animate: true, duration: 0.8 });
+    }
+  }
+
+  function switchTileLayer(to?: 'street' | 'sat'): 'street' | 'sat' {
+    if (to) {
+      curLayer = to;
+    } else {
+      curLayer = curLayer === 'street' ? 'sat' : 'street';
+    }
+
+    if (curLayer === 'street') {
+      if (sat && map.hasLayer(sat)) map.removeLayer(sat);
+      if (street && !map.hasLayer(street)) street.addTo(map);
+    } else {
+      if (street && map.hasLayer(street)) map.removeLayer(street);
+      if (sat && !map.hasLayer(sat)) sat.addTo(map);
+    }
+    segGroup.eachLayer((l) => {
+      if ('bringToFront' in l && typeof l.bringToFront === 'function') l.bringToFront();
+    });
+    nodeLayer.eachLayer((l) => {
+      if ('bringToFront' in l && typeof l.bringToFront === 'function') l.bringToFront();
+    });
+    return curLayer;
+  }
+
+  function focusNode(no: number | string): void {
+    const target = rawNodes.find((n) => n.autoNo === Number(no));
+    if (target) {
+      map.flyTo(cvt([target.pos.lat, target.pos.lng]), 17, { animate: true, duration: 0.8 });
+    }
+  }
+
   function destroy(): void {
     map.remove();
   }
@@ -260,5 +295,16 @@ export function mountMap(
     map.invalidateSize();
   }
 
-  return { follow, setTrack, setNodes, invalidateSize, destroy };
+  return {
+    follow,
+    setTrack,
+    setNodes,
+    recenter,
+    fitBounds,
+    switchTileLayer,
+    focusNode,
+    invalidateSize,
+    destroy,
+  };
 }
+

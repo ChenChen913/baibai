@@ -167,6 +167,15 @@ function elapsedMs(): number {
   return Math.max(0, now() - recorder.snapshot.createdAt);
 }
 
+async function refreshHistoryDrawer(): Promise<void> {
+  const sessions = (await listSessions()).sort((a, b) => b.createdAt - a.createdAt);
+  const statsMap = new Map<string, string>();
+  for (const s of sessions) {
+    statsMap.set(s.id, await statFor(s));
+  }
+  ui.setHistorySessions(sessions, statsMap);
+}
+
 function mountRecord(): Ui {
   ui = mountUi(app, {
     onStart() {
@@ -260,10 +269,12 @@ function mountRecord(): Ui {
         .catch((e: unknown) => ui.toast(e instanceof Error ? e.message : '导出失败'));
     },
     onHistory() {
-      void showHistory();
+      void refreshHistoryDrawer();
     },
     onPlan() {
-      showPlanView();
+      void loadPlan(bizDate.getFullYear()).then((p) => {
+        ui.setPlan(p ?? null);
+      });
     },
     onFeedbackToggle() {
       toggleFeedback();
@@ -279,6 +290,47 @@ function mountRecord(): Ui {
         ui.toast('先开始拜年拿到定位，再点「预载」');
       }
     },
+    onRecenter() {
+      mapCtrl?.recenter();
+    },
+    onFitBounds() {
+      mapCtrl?.fitBounds();
+    },
+    onLayerSwitch() {
+      const next = mapCtrl?.switchTileLayer();
+      ui.toast(next === 'sat' ? '已切换至高德卫星影像' : '已切换至高德矢量地图');
+    },
+    onFocusNode(no) {
+      mapCtrl?.focusNode(no);
+    },
+    onAddHouse() {
+      showPlanView();
+    },
+    onImportPlan() {
+      showPlanView();
+    },
+    onSelectHistory(id) {
+      void listSessions().then((list) => {
+        const found = list.find((s) => s.id === id);
+        if (found) showReview(found);
+      });
+    },
+    onDemoHistory() {
+      showReview(generateDemoSession());
+    },
+    onImportJson(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        importAllJson(String(reader.result ?? ''))
+          .then(async (n) => {
+            ui.toast(`已导入 ${n} 场拜年记录`);
+            await refreshHistoryDrawer();
+          })
+          .catch((e: unknown) => ui.toast(e instanceof Error ? e.message : '导入失败'));
+      };
+      reader.onerror = () => ui.toast('读取文件失败');
+      reader.readAsText(file);
+    },
   });
   mapCtrl = mountMap(
     app.querySelector<HTMLElement>('#map')!,
@@ -287,6 +339,9 @@ function mountRecord(): Ui {
   syncMap();
   ui.setFeedbackOn(feedbackOn());
   ui.setDateLabel(cnyLabel(bizDate));
+  void loadPlan(bizDate.getFullYear()).then((p) => {
+    ui.setPlan(p ?? null);
+  });
   return ui;
 }
 
