@@ -11,7 +11,7 @@
 | 层 | Organic Maps 的做法 | 证据 |
 |---|---|---|
 | 底图数据 | OpenStreetMap 全球数据 → 自研 generator_tool（C++23）编译成**私有二进制矢量格式 .mwm**（分块容器，非 protobuf，格式 v1→v11 快速演进、无公开文档） | docs/MAPS.md、libs/coding/files_container.hpp |
-| 离线分发 | 世界按 data/borders/ 1159 个区域切块，中国**省级**粒度；用户按需下载 .mwm 存本地（山东省 ≈ **98MB**、广东 211MB、上海 39MB；县需自切 ≈ 2~20MB） | data/countries.json（China_Shandong s=103,011,291）、data/borders/China_*.poly |
+| 离线分发 | 世界按 data/borders/ 1159 个区域切块，中国**省级**粒度；用户按需下载 .mwm 存本地（山东省 ≈ **98MB**、广东 211MB、上海 39MB）；**支持自定义县级切图**（GeoJSON 边界 + osmium extract，README 的 Custom maps 流程），县 ≈ 2~20MB、生成分钟级；下载 URL = maps/{版本}/{文件}.mwm + diffs/ 增量补丁 | data/countries.json（China_Shandong s=103,011,291）、data/borders/China_*.poly、libs/platform/downloader_utils.cpp |
 | 渲染 | 自研 C++ 引擎 **drape**（419 文件/2.3MB，OpenGL ES 3.0 / Vulkan(API≥26) / Metal 三后端），MapCSS 样式 → drules_*.bin 二进制绘制规则 | libs/drape/、libs/shaders/gl_shaders_preprocessor.py、docs/STYLES.md |
 | 平台桥 | 安卓 = 原生 View + **SurfaceView + JNI**：MapView(SurfaceView) → Map.cpp nativeCreateEngine → Framework::CreateDrapeEngine；单 .so（15~25MB/ABI） | android/sdk/.../MapView.java、sdk/src/main/cpp/.../Map.cpp、Framework.cpp:174 |
 | 定位 | Provider 抽象 + 动态间隔调度（移动 100ms/静止 3000ms）+ 劣质点过滤 + A-GPS 注入；后台仅用前台服务（无后台定位权限） | sdk/location/core/BaseLocationProvider.java、app/.../LocationHelper.java |
@@ -59,7 +59,7 @@ OM 真正值得移植的是**架构思想**：底图必须能离线。落地用�
   - 网页版 Service Worker 同步扩展（现有 TILE_CACHE 只认 OSM 域名且上限 600 条，需支持高德域名 + 分级容量）。
   - **目标：你家方圆几公里的地图，装上就永远能看。**
 - **C2（中，1~2 周，可选进阶）**：换 **MapLibre GL Native**（开源、BSD 许可）+ **PMTiles/MBTiles 离线矢量底图**：
-  - 用 OSM 数据为"昌乐县"自生成矢量底图（县 ≈ 2~20MB，参考 OM 的 osmium/Geofabrik 流程）；
+  - 用 OSM 数据为"昌乐县"自生成矢量底图（县 ≈ 2~20MB、分钟级生成；切图流程直接借鉴 OM 的 GeoJSON 边界 + osmium extract 做法，再走 Geofabrik pbf）；
   - 离线矢量渲染（比瓦片省 10 倍流量与空间）、可自定义样式（借 OM 的 MapCSS 配色思路）；
   - 卫星图层继续高德在线瓦片 + 缓存。
   - 这是把 OM 的离线体验"用 1/10 的工程量"搬到 baibai。
