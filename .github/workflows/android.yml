@@ -13,23 +13,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 引导守卫：Gradle 工程未初始化时（当前只推了文档）跳过构建，保持 CI 全绿
+      - name: Check project initialized
+        id: check
+        run: |
+          if [ -f android/settings.gradle.kts ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Gradle 工程尚未初始化（仅文档变更），跳过构建"
+          fi
+
       - uses: actions/setup-java@v4
+        if: steps.check.outputs.ready == 'true'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: android-actions/setup-android@v3
+        if: steps.check.outputs.ready == 'true'
 
       - name: Grant gradlew
+        if: steps.check.outputs.ready == 'true'
         run: chmod +x android/gradlew
 
       - name: Run all tests (core JUnit + app Robolectric)
+        if: steps.check.outputs.ready == 'true'
         run: cd android && ./gradlew test
 
       - name: Build debug APK
+        if: steps.check.outputs.ready == 'true'
         run: cd android && ./gradlew assembleDebug
 
       - name: Upload APK artifact
+        if: steps.check.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: baibai-debug-apk
