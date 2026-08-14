@@ -182,7 +182,7 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
                         .aspectRatio(W / H)
                         .background(Color(0xFFF3EAD9)),
                 ) {
-                    val (_, color, _) = TAB_META.getValue(tab)
+                    val (_, routeColor, _) = TAB_META.getValue(tab)
                     // 实走轨迹（morph 时淡出）
                     val actualPath = Path()
                     plan.pts.forEachIndexed { i, p ->
@@ -207,9 +207,12 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
                         }
                         drawPath(
                             path.asComposePath(),
-                            color = color.copy(alpha = if (lit) 1f else 0.3f),
-                            style = Stroke(width = if (lit) 4f else 1.5f, cap = StrokeCap.Round),
-                            pathEffect = if (e.known) null else PathEffect.dashPathEffect(floatArrayOf(8f, 6f)),
+                            color = routeColor.copy(alpha = if (lit) 1f else 0.3f),
+                            style = Stroke(
+                                width = if (lit) 4f else 1.5f,
+                                cap = StrokeCap.Round,
+                                pathEffect = if (e.known) null else PathEffect.dashPathEffect(floatArrayOf(8f, 6f)),
+                            ),
                         )
                     }
 
@@ -229,7 +232,7 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
                             center = Offset(p.x.toFloat(), p.y.toFloat()),
                         )
                         drawCircle(
-                            color,
+                            routeColor,
                             radius = if (isHome) 10f else 9f,
                             style = Stroke(width = 2.5f),
                             center = Offset(p.x.toFloat(), p.y.toFloat()),
