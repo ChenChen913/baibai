@@ -7,6 +7,7 @@ import { lerpPolyline, type XY } from './polyline.js';
 import type { Route } from './optimize.js';
 import { analyze, analyzeSync, morph, morphSync, type Card } from './compute.js';
 import { ICONS } from './icons.js';
+import { launchConfetti } from './confetti.js';
 
 const W = 480;
 const H = 560;
@@ -15,9 +16,9 @@ const MORPH_MS = 3000;
 type Tab = 'walk_time' | 'walk_dist' | 'fly';
 
 const TAB_META: Record<Tab, { label: string; color: string; icon: string }> = {
-  walk_time: { label: '走路时间最优', color: '#c8402f', icon: ICONS.walk },
-  walk_dist: { label: '走路距离最优', color: '#e8a23d', icon: ICONS.ruler },
-  fly: { label: '飞行最优', color: '#c9971c', icon: ICONS.plane },
+  walk_time: { label: '时间最优', color: '#2563eb', icon: ICONS.walk },
+  walk_dist: { label: '距离最优', color: '#10b981', icon: ICONS.ruler },
+  fly: { label: '飞行最优', color: '#d97706', icon: ICONS.plane },
 };
 
 const fmtKm = (m: number): string => `${(m / 1000).toFixed(2)} km`;
@@ -90,25 +91,37 @@ export function mountOptimizeView(
       return;
     }
     $('opt-cards').innerHTML = `
-      <div class="card">
-        <span>🧧 今年实走</span>
+      <div class="card actual-card">
+        <div class="card-head-row">
+          <span>🧧 今年实走</span>
+          <span class="badge-saving gold">实走总计</span>
+        </div>
         <b>${fmtKm(card.actualDistM)}</b>
         <span>路上 ${fmtMin(card.actualMoveSec)} · 骑行 ${fmtKm(card.bikeDistM)} · 全天 ${fmtMin(card.actualTotalSec)}</span>
       </div>
-      <div class="card">
-        <span>🚶 走路时间最优（理论）</span>
+      <div class="card time-card">
+        <div class="card-head-row">
+          <span>🚶 时间最优（理论）</span>
+          <span class="badge-saving blue">✨ 省 ${fmtPct(card.savingsTimePct)}</span>
+        </div>
         <b>${fmtMin(card.timeOptSec)}</b>
         <span>比实走路上时间省 ${fmtPct(card.savingsTimePct)}</span>
       </div>
-      <div class="card">
-        <span>📏 距离最优</span>
+      <div class="card dist-card">
+        <div class="card-head-row">
+          <span>📏 距离最优</span>
+          <span class="badge-saving green">✨ 省 ${fmtPct(card.savingsDistPct)}</span>
+        </div>
         <b>${fmtKm(card.distOptM)}</b>
-        <span>省 ${fmtPct(card.savingsDistPct)}</span>
+        <span>节省路程 ${fmtPct(card.savingsDistPct)}</span>
       </div>
-      <div class="card">
-        <span>✈️ 如果能飞</span>
+      <div class="card fly-card">
+        <div class="card-head-row">
+          <span>✈️ 如果能飞</span>
+          <span class="badge-saving gold">✨ 少走 ${fmtPct(card.savingsFlyPct)}</span>
+        </div>
         <b>${fmtKm(card.flyOptM)}</b>
-        <span>少走 ${fmtPct(card.savingsFlyPct)}</span>
+        <span>直线少走 ${fmtPct(card.savingsFlyPct)}</span>
       </div>`;
   }
 
@@ -219,6 +232,7 @@ export function mountOptimizeView(
   function playMorph(): void {
     if (!ready || planPts.length < 2 || flyRes.length < 2) return;
     stopAnim();
+    launchConfetti(40);
     revealK = route().edges.length;
     morphT = 0;
     const t0 = performance.now();

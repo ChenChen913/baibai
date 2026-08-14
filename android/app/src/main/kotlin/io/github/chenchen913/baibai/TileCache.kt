@@ -109,13 +109,15 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
     fun totalBytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
 
     /** 网络下载单张瓦片；失败打日志（P4），返回 null */
-    private fun httpGet(url: String): ByteArray? {
+    private fun httpGet(url: String, depth: Int = 0): ByteArray? {
+        if (depth > 3) return null
         val conn = runCatching {
             (URL(url).openConnection() as HttpURLConnection).apply {
                 // shouldInterceptRequest 同步调用本方法（P3 改回同步注入字节）：
                 // 超时收紧到 4s/5s，死网络下尽快失败，让 tileerror→OSM 回退早触发，避免长时间占住 WebView 网络线程
                 connectTimeout = 4000
                 readTimeout = 5000
+                instanceFollowRedirects = true
                 setRequestProperty("User-Agent", userAgent)
                 // P5：高德瓦片带 Referer，贴近网页端调用习惯，降低风控风险
                 if (url.contains("is.autonavi.com")) {
@@ -131,6 +133,14 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
             val code = conn.responseCode
             if (code == 200) {
                 conn.inputStream.use { it.readBytes() }
+            } else if (code in 301..308) {
+                val loc = conn.getHeaderField("Location")
+                if (!loc.isNullOrEmpty()) {
+                    httpGet(loc, depth + 1)
+                } else {
+                    Log.w(TAG, "瓦片重定向无Location HTTP " + code + "：" + url)
+                    null
+                }
             } else {
                 Log.w(TAG, "瓦片下载失败 HTTP " + code + "：" + url)
                 null

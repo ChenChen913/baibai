@@ -71,6 +71,21 @@
 (function () {
   var map = L.map('map', { zoomControl:false, attributionControl:false, center:[36.71,119.1], zoom:14 });
 
+  /* ---------- 容器尺寸自适应（解决 Android WebView 初始 0 尺寸不加载瓦片问题） ---------- */
+  function ensureSize() {
+    try {
+      if (map) map.invalidateSize({ pan: false });
+    } catch (e) {}
+  }
+  window.addEventListener('resize', ensureSize);
+  setTimeout(ensureSize, 100);
+  setTimeout(ensureSize, 400);
+  setTimeout(ensureSize, 1000);
+  if (typeof ResizeObserver !== 'undefined') {
+    var ro = new ResizeObserver(function () { ensureSize(); });
+    ro.observe(document.getElementById('map'));
+  }
+
   /* ---------- WGS-84 → GCJ-02（高德瓦片是火星坐标，定位是 WGS-84，必须转换） ---------- */
   var PI = Math.PI, A = 6378245.0, EE = 0.00669342162296594323;
   function outOfChina(lat, lng) { return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271; }
@@ -308,8 +323,14 @@
   }
 
   window.BaibaiMap = {
+    // 强制触发一次尺寸刷新与重算
+    invalidateSize: function () {
+      ensureSize();
+    },
+
     // 追加最新定位点（按时间戳去重），视野跟随当前位置，当前段实时增长
     follow: function (lat, lng, acc, t) {
+      ensureSize();
       if (!isFinite(lat) || !isFinite(lng)) return;
       if (t && t === lastT) return;
       lastT = t || 0;
@@ -321,6 +342,7 @@
 
     // 只显示当前位置（开始拜年前的等待期：还没轨迹，先看到自己在哪）
     locate: function (lat, lng, acc) {
+      ensureSize();
       if (!isFinite(lat) || !isFinite(lng)) return;
       drawMe(lat, lng, acc);
       map.setView(cvt([lat, lng]), Math.max(map.getZoom(), 16), { animate: true });
@@ -328,12 +350,14 @@
 
     // P7：仅移动视野不画点（IDLE 态把地图中心放到用户上次的位置）
     center: function (lat, lng, zoom) {
+      ensureSize();
       if (!isFinite(lat) || !isFinite(lng)) return;
       map.setView(cvt([lat, lng]), zoom || 14, { animate: false });
     },
 
     // 整条轨迹 + 段起点下标（恢复/继续/重新展开时全量同步）
     setTrack: function (pts, breaks) {
+      ensureSize();
       lastT = 0;
       rawTrack = [];
       for (var i = 0; i < pts.length; i++) {
@@ -351,6 +375,7 @@
 
     // 家（金）+ 户（红圈数字，悬浮户名）
     setNodes: function (home, nodes) {
+      ensureSize();
       rawHome = home || null;
       rawNodes = nodes || [];
       drawNodes();

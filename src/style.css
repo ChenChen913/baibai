@@ -27,37 +27,67 @@ body {
   min-height: 100vh;
 }
 
-/* D21：白天暖色年味装饰——边缘虚化低透明的礼花/炮仗，绝不进主体 */
+/* D21：新春年味装饰——左上角礼花与右下角燃放鞭炮 */
 .decor {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
+  overflow: hidden;
 }
 
 .decor-item {
   position: absolute;
-  opacity: 0.2;
-  filter: blur(1px);
+  pointer-events: none;
+  transition: opacity 0.3s ease;
 }
 
+/* 左上角：新春鎏金绽放礼花 */
 .decor-firework {
-  width: 170px;
-  top: -24px;
-  left: -24px;
+  width: 220px;
+  height: 220px;
+  top: -12px;
+  left: -12px;
+  opacity: 0.72;
+  filter: drop-shadow(0 6px 20px rgba(245, 158, 11, 0.28));
+  animation: fireworkFloat 7s ease-in-out infinite alternate;
 }
 
-.decor-firework2 {
-  width: 120px;
-  bottom: -16px;
-  right: -16px;
-  transform: rotate(160deg);
-}
-
+/* 右下角：传统国潮燃放鞭炮与爆破金光 */
 .decor-cracker {
-  width: 64px;
-  bottom: 10vh;
-  left: 8px;
+  width: 140px;
+  height: 240px;
+  bottom: 0px;
+  right: 0px;
+  opacity: 0.75;
+  filter: drop-shadow(0 6px 16px rgba(220, 38, 38, 0.22));
+  animation: crackerFlicker 3.5s ease-in-out infinite alternate;
+}
+
+@keyframes fireworkFloat {
+  0% {
+    transform: scale(0.96) rotate(0deg);
+    opacity: 0.68;
+  }
+  100% {
+    transform: scale(1.03) rotate(4deg);
+    opacity: 0.82;
+  }
+}
+
+@keyframes crackerFlicker {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translateY(-3px) rotate(-1.5deg);
+    opacity: 0.82;
+  }
+  100% {
+    transform: translateY(1.5px) rotate(1deg);
+    opacity: 0.75;
+  }
 }
 
 .wrap {
@@ -371,22 +401,104 @@ button:disabled {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 22px;
-  padding: 22px 20px 18px;
+  padding: 20px 20px 18px;
   box-shadow: var(--shadow);
   margin-bottom: 14px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
 .status {
   font-size: 32px;
   font-weight: 800;
   letter-spacing: 2px;
-  margin-bottom: 4px;
+}
+
+/* GPS 信号动态指示灯与呼吸胶囊 */
+.gps-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  transition: all 0.2s ease;
+}
+
+.gps-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.gps-badge.good {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #065f46;
+}
+.gps-badge.good .gps-dot {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: gpsPulse 2s infinite ease-in-out;
+}
+
+.gps-badge.fair {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #92400e;
+}
+.gps-badge.fair .gps-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: gpsPulse 2s infinite ease-in-out;
+}
+
+.gps-badge.weak {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #991b1b;
+}
+.gps-badge.weak .gps-dot {
+  background: #ef4444;
+  animation: gpsPulse 1.2s infinite ease-in-out;
+}
+
+.gps-badge.ready {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink-soft);
+}
+.gps-badge.ready .gps-dot {
+  background: var(--accent2);
+}
+
+@keyframes gpsPulse {
+  0%, 100% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
 }
 
 .meta {
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 13.5px;
   margin-bottom: 16px;
+  line-height: 1.4;
 }
 
 .stat-row {
@@ -406,6 +518,8 @@ button:disabled {
 .stat b {
   font-size: 26px;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  font-family: ui-monospace, SFMono-Regular, "SF Pro Text", monospace, sans-serif;
   color: var(--accent);
 }
 
@@ -423,7 +537,7 @@ button:disabled {
 .map-card {
   position: relative;
   z-index: 0;
-  border-radius: 22px;
+  border-radius: 20px;
   overflow: hidden;
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
@@ -436,10 +550,18 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
+  height: 42px;
   padding: 0 8px 0 16px;
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
+}
+
+.map-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .map-title {
@@ -448,9 +570,24 @@ button:disabled {
   color: var(--ink);
 }
 
+.map-mode-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(200, 64, 47, 0.08);
+  color: var(--accent);
+}
+
+.map-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .map-toggle {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -459,8 +596,8 @@ button:disabled {
 }
 
 .map-preload {
-  height: 30px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
   font-weight: 700;
   color: var(--accent);
@@ -491,24 +628,45 @@ button:disabled {
   right: 10px;
   z-index: 1000;
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 4px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(90, 58, 42, 0.18);
+  border: 1px solid var(--line);
 }
 
 .baibai-layer-switch button {
   border: 0;
   border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 13px;
+  padding: 6px 12px;
+  font-size: 12px;
   font-weight: 700;
   font-family: inherit;
-  background: rgba(255, 255, 255, 0.94);
+  background: transparent;
   color: var(--ink);
-  box-shadow: 0 2px 8px rgba(90, 58, 42, 0.18);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .baibai-layer-switch button.on {
   background: linear-gradient(135deg, var(--accent), #a62d22);
   color: #fff;
+  box-shadow: 0 2px 6px rgba(166, 45, 34, 0.28);
+}
+
+.baibai-layer-switch .recenter-btn {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.baibai-layer-switch .recenter-btn:active {
+  transform: scale(0.92);
 }
 
 .map-card.collapsed #map {
@@ -524,7 +682,7 @@ button:disabled {
   color: var(--ink-soft);
   text-align: center;
   padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.65);
   border-top: 1px solid var(--line);
 }
 
@@ -569,6 +727,33 @@ button:disabled {
   margin-bottom: 14px;
 }
 
+.primary-zone button.primary {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(200, 64, 47, 0.32);
+}
+
+.primary-zone button.primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(200, 64, 47, 0.22);
+}
+
+.finish-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: rgba(200, 64, 47, 0.18);
+  transition: width 0s;
+  pointer-events: none;
+}
+
+.side-zone .ghost#btn-finish.holding .finish-progress {
+  width: 100%;
+  transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .side-zone {
   display: flex;
   gap: 10px;
@@ -577,6 +762,8 @@ button:disabled {
 }
 
 .side-zone .ghost {
+  position: relative;
+  overflow: hidden;
   padding: 10px 20px;
   min-height: 44px;
 }
@@ -841,8 +1028,8 @@ select {
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .card {
@@ -851,36 +1038,93 @@ select {
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 13px 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   box-shadow: 0 4px 14px rgba(90, 58, 42, 0.06);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-head-row span {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.badge-saving {
+  font-size: 11.5px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+
+.badge-saving.blue {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+
+.badge-saving.green {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.badge-saving.gold {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+  border: 1px solid rgba(217, 119, 6, 0.25);
 }
 
 .card span {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ink-soft);
 }
 
 .card b {
-  font-size: 22px;
+  font-size: 24px;
+  font-weight: 800;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  font-family: ui-monospace, SFMono-Regular, "SF Pro Text", monospace, sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.card.time-card b {
+  color: #2563eb;
+}
+
+.card.dist-card b {
+  color: #10b981;
+}
+
+.card.fly-card b {
+  color: #d97706;
 }
 
 .opt-actual {
   fill: none;
-  stroke: rgba(200, 64, 47, 0.45);
-  stroke-width: 3;
+  stroke: rgba(200, 64, 47, 0.5);
+  stroke-width: 3.5;
   stroke-linecap: round;
 }
 
 .opt-morph {
   fill: none;
-  stroke: #c9971c;
-  stroke-width: 4;
+  stroke: #f59e0b;
+  stroke-width: 4.5;
   stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.5));
 }
 
 .node.lit circle {
@@ -894,8 +1138,9 @@ select {
 
 .hint {
   font-size: 13px;
-  opacity: 0.72;
+  opacity: 0.75;
   margin: 10px 0 0;
+  text-align: center;
 }
 
 .chip {

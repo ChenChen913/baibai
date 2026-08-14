@@ -6,6 +6,9 @@ dist/
 # 参考项目（调研用，不随 baibai 提交）
 organicmaps-master/
 
+# 本地手工修复副本（baibai2，用户工作目录）
+baibai2/
+
 # Android（Gradle）
 android/.gradle/
 android/**/build/

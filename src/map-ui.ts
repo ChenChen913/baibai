@@ -72,19 +72,40 @@ export function mountMap(
   makeStreet();
   makeSat();
 
-  // 图层切换按钮（注入地图容器右上角）
+  // 图层切换与回正悬浮控制组（注入地图容器右上角）
   const sw = document.createElement('div');
   sw.className = 'baibai-layer-switch';
+
+  const btnRecenter = document.createElement('button');
+  btnRecenter.className = 'map-ctrl-btn recenter-btn';
+  btnRecenter.innerHTML = '<span class="ctrl-icon">🎯</span><span>回正</span>';
+  btnRecenter.title = '回正并跟随当前位置';
+
   const btnStreet = document.createElement('button');
-  btnStreet.textContent = '地图';
+  btnStreet.textContent = '街道';
   btnStreet.className = 'on';
+
   const btnSat = document.createElement('button');
   btnSat.textContent = '卫星';
-  sw.append(btnStreet, btnSat);
+
+  sw.append(btnRecenter, btnStreet, btnSat);
   el.appendChild(sw);
+
+  let lastPos: [number, number] | null = initial ? [initial.lat, initial.lng] : null;
+
+  btnRecenter.addEventListener('click', () => {
+    if (lastPos) {
+      map.setView(cvt(lastPos), Math.max(map.getZoom(), 16), { animate: true });
+    }
+  });
+
   const syncButtons = (): void => {
     btnStreet.classList.toggle('on', curLayer === 'street');
     btnSat.classList.toggle('on', curLayer === 'sat');
+    const modeTag = document.querySelector<HTMLElement>('#map-mode-tag');
+    if (modeTag) {
+      modeTag.textContent = curLayer === 'street' ? '街道' : '卫星';
+    }
   };
   btnStreet.addEventListener('click', () => {
     if (sat && map.hasLayer(sat)) map.removeLayer(sat);
@@ -203,6 +224,7 @@ export function mountMap(
   }
 
   function follow(lat: number, lng: number, accM?: number): void {
+    lastPos = [lat, lng];
     trackPts.push([lat, lng]);
     drawSegments();
     drawMe(lat, lng, accM);

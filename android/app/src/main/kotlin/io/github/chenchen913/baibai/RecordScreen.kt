@@ -613,6 +613,10 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                         settings.builtInZoomControls = false
                         settings.setSupportZoom(false)
                         settings.displayZoomControls = false
+                        // 瓦片字节由 shouldInterceptRequest 在网络层注入，file:// 页面不自行跨域取资源，
+                        // 因此无需 allowUniversalAccessFromFileURLs / mixedContentMode 等安全放宽项
+                        settings.allowFileAccess = true
+                        settings.allowContentAccess = true
                         // P5：与 TileCache 完全一致的 UA（浏览器默认 UA + baibai 标识），命中/未命中行为不再分裂
                         settings.userAgentString = tileCache.userAgent
                         // P4：把 map.html 的 console.warn/error 接到 logcat（tag=BaibaiMap），真机可定位
@@ -631,6 +635,7 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 pageReady = true
+                                view?.evaluateJavascript("window.BaibaiMap && window.BaibaiMap.invalidateSize && window.BaibaiMap.invalidateSize()", null)
                             }
 
                             // P4：页面/资源加载失败可见化

@@ -2,6 +2,7 @@
 
 import type { Mode, SessionData } from './state.js';
 import { ICONS } from './icons.js';
+import { launchConfetti } from './confetti.js';
 
 export interface UiCallbacks {
   onStart(): void;
@@ -28,6 +29,7 @@ export interface Ui {
   confirm(msg: string): boolean;
   setFeedbackOn(on: boolean): void;
   setDateLabel(label: string): void;
+  celebrate(): void;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -54,8 +56,11 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
         <button id="btn-feedback" class="sound-toggle" aria-label="关闭提示音与震动">${ICONS.bell}</button>
       </header>
       <div class="stat-card">
-        <div class="status" id="status">待机</div>
-        <div class="meta" id="meta"></div>
+        <div class="status-row">
+          <div class="status" id="status">待机</div>
+          <div id="gps-badge" class="gps-badge"><span class="gps-dot"></span><span id="gps-text">定位就绪</span></div>
+        </div>
+        <div class="meta" id="meta">从家门口出发，按「开始拜年」</div>
         <div class="stat-row">
           <div class="stat"><b id="stat-count">0</b><span>拜访户数</span></div>
           <div class="stat-divider"></div>
@@ -64,21 +69,26 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       </div>
       <div class="map-card" id="map-card">
         <div class="map-head">
-          <span class="map-title">实时地图</span>
-          <button id="map-preload" class="map-preload">预载</button>
-          <button id="map-toggle" class="map-toggle" aria-label="收起地图">${ICONS.chevron}</button>
+          <div class="map-title-wrap">
+            <span class="map-title">实时地图</span>
+            <span id="map-mode-tag" class="map-mode-tag">街道</span>
+          </div>
+          <div class="map-actions">
+            <button id="map-preload" class="map-preload">预载周边</button>
+            <button id="map-toggle" class="map-toggle" aria-label="收起地图">${ICONS.chevron}</button>
+          </div>
         </div>
         <div id="map"></div>
-        <div class="map-cap">实时地图 · © OpenStreetMap 贡献者 · 瓦片失败自动换源</div>
+        <div class="map-cap">实时地图 · © OpenStreetMap / 高德 · 瓦片失败自动换源</div>
       </div>
       <div class="bottom-dock">
         <div class="primary-zone">
-          <button id="btn-start" class="primary">开始拜年</button>
-          <button id="btn-pause" class="primary">到一户了 · 暂停</button>
-          <button id="btn-resume" class="primary">继续出发</button>
+          <button id="btn-start" class="primary"><span class="btn-glow"></span>开始拜年</button>
+          <button id="btn-pause" class="primary"><span class="btn-glow"></span>到一户了 · 暂停</button>
+          <button id="btn-resume" class="primary"><span class="btn-glow"></span>继续出发</button>
           <div class="side-zone">
             <button id="btn-undo" class="ghost">撤销</button>
-            <button id="btn-finish" class="ghost danger-text">结束拜年</button>
+            <button id="btn-finish" class="ghost danger-text" title="点击或长按结束本次拜年"><span class="finish-progress"></span>结束拜年</button>
             <button id="btn-export" class="ghost">导出数据</button>
           </div>
         </div>
@@ -94,11 +104,56 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   `;
 
   const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>('#' + id)!;
-  $('btn-start').addEventListener('click', () => cb.onStart());
+  $('btn-start').addEventListener('click', () => {
+    launchConfetti(25);
+    cb.onStart();
+  });
   $('btn-pause').addEventListener('click', () => cb.onPause());
   $('btn-resume').addEventListener('click', () => cb.onResume());
   $('btn-undo').addEventListener('click', () => cb.onUndo());
-  $('btn-finish').addEventListener('click', () => cb.onFinish());
+
+  // 结束拜年：防误触长按保护与即时响应兼备
+  const finishBtn = $('btn-finish') as HTMLButtonElement;
+  let finishHoldTimer: number | undefined;
+  let finishHolding = false;
+
+  const startHold = (): void => {
+    finishHolding = true;
+    finishBtn.classList.add('holding');
+    window.clearTimeout(finishHoldTimer);
+    finishHoldTimer = window.setTimeout(() => {
+      if (finishHolding) {
+        finishHolding = false;
+        finishBtn.classList.remove('holding');
+        launchConfetti(45);
+        cb.onFinish();
+      }
+    }, 1200);
+  };
+
+  const cancelHold = (): void => {
+    if (finishHolding) {
+      finishHolding = false;
+      finishBtn.classList.remove('holding');
+      window.clearTimeout(finishHoldTimer);
+    }
+  };
+
+  finishBtn.addEventListener('pointerdown', startHold);
+  finishBtn.addEventListener('pointerup', cancelHold);
+  finishBtn.addEventListener('pointercancel', cancelHold);
+  finishBtn.addEventListener('mouseleave', cancelHold);
+  // 保留直接 click 以兼容桌面与单元测试
+  finishBtn.addEventListener('click', (e) => {
+    if (e.detail === 0) {
+      // 键盘或程序化模拟点击
+      cb.onFinish();
+    } else {
+      // 正常鼠标短点：友好弹窗确认
+      cb.onFinish();
+    }
+  });
+
   $('btn-export').addEventListener('click', () => cb.onExport());
   $('btn-walk').addEventListener('click', () => cb.onMode('walk'));
   $('btn-bike').addEventListener('click', () => cb.onMode('bike'));
@@ -137,6 +192,8 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     toastTimer = window.setTimeout(() => t.classList.remove('show'), 2400);
   }
 
+  let lastNodeCount = 0;
+
   function render(
     s: SessionData | null,
     elapsedMs: number,
@@ -145,6 +202,29 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     const st = s?.state ?? 'IDLE';
     $('status').textContent = STATE_LABEL[st] ?? st;
     const acc = gpsInfo?.acc ?? null;
+    const gpsBadge = $('gps-badge');
+    const gpsText = $('gps-text');
+
+    if (acc !== null) {
+      const roundedAcc = Math.round(acc);
+      if (acc <= 10) {
+        gpsBadge.className = 'gps-badge good';
+        gpsText.textContent = `GPS ±${roundedAcc}m`;
+      } else if (acc <= 30) {
+        gpsBadge.className = 'gps-badge fair';
+        gpsText.textContent = `GPS ±${roundedAcc}m`;
+      } else {
+        gpsBadge.className = 'gps-badge weak';
+        gpsText.textContent = `网络定位 ±${roundedAcc}m`;
+      }
+    } else if (gpsInfo?.waiting) {
+      gpsBadge.className = 'gps-badge weak';
+      gpsText.textContent = '搜星中…';
+    } else {
+      gpsBadge.className = 'gps-badge ready';
+      gpsText.textContent = '就绪';
+    }
+
     if (s) {
       $('meta').textContent =
         st === 'WALKING' || st === 'PAUSED'
@@ -159,8 +239,15 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
         ? '正在获取定位，请允许浏览器定位权限…'
         : '从家门口出发，按「开始拜年」';
     }
+
+    const currentCount = s?.nodes.length ?? 0;
+    if (currentCount > 0 && currentCount % 10 === 0 && currentCount !== lastNodeCount) {
+      launchConfetti(35);
+    }
+    lastNodeCount = currentCount;
+
     // 拜访户数 = 唯一户数（nodes 不含 home；P9：中途回家/回访不虚高）
-    $('stat-count').textContent = String(s?.nodes.length ?? 0);
+    $('stat-count').textContent = String(currentCount);
     $('stat-time').textContent = fmt(elapsedMs);
     $('btn-start').style.display = st === 'IDLE' ? '' : 'none';
     $('btn-pause').style.display = st === 'WALKING' ? '' : 'none';
@@ -180,5 +267,12 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     $('btn-date').textContent = label;
   }
 
-  return { render, toast, confirm: (m: string) => window.confirm(m), setFeedbackOn, setDateLabel };
+  return {
+    render,
+    toast,
+    confirm: (m: string) => window.confirm(m),
+    setFeedbackOn,
+    setDateLabel,
+    celebrate: () => launchConfetti(50),
+  };
 }

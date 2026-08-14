@@ -3,7 +3,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   base: './',
   server: {
-    host: true,
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true,
     watch: {
       // 忽略编辑器/工具的原子写入临时目录，避免 Windows 下 EBUSY 崩溃
       ignored: ['**/.*.tmpdir/**'],
