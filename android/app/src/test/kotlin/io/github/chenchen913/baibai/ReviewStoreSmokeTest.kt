@@ -47,7 +47,7 @@ class ReviewStoreSmokeTest {
         store.saveSession(merged)
         val r = reload(s.id)
         assertEquals(7, r.nodes.size)
-        assertEquals(9, r.visits.size)
+        assertEquals(8, r.visits.size) // 合并重挂访问，访问总数不变
     }
 
     @Test
