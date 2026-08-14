@@ -105,7 +105,13 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
 
     val route = routes.first { it.mode == tab }
     fun posOf(id: String) = if (id == "home") session.home else session.nodes.first { it.id == id }.pos
-    fun proj(id: String) = Track.projectToView(listOf(posOf(id)), W.toDouble(), H.toDouble())[0]
+    // 全部节点一起投影：单点投影会把每个点各自"居中" → 所有标记叠在左上角同一处（用户实机发现的重叠根因）
+    val projMap: Map<String, XY> = remember(session) {
+        val ids = listOf("home") + session.nodes.map { it.id }
+        val pr = Track.projectToView(ids.map { posOf(it) }, W.toDouble(), H.toDouble())
+        ids.mapIndexed { i, id -> id to pr[i] }.toMap()
+    }
+    fun proj(id: String) = projMap.getValue(id)
 
     // morph 端点：实走路径与飞行星形（同点数重采样）
     val actualRes = remember(plan) {

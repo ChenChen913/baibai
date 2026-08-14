@@ -79,7 +79,10 @@ export function mountOptimizeView(
   const route = (): Route => routes.find((r) => r.mode === tab)!;
   const posOf = (id: string) =>
     id === 'home' ? s.home : s.nodes.find((n) => n.id === id)!.pos;
-  const proj = (id: string) => projectToView([posOf(id)], W, H)[0];
+  // 全部节点一起投影：单点投影会把每个点都当"整个画布"居中 → 所有标记叠在左上角同一处
+  const nodeIds = ['home', ...s.nodes.map((n) => n.id)];
+  const projAll = projectToView(nodeIds.map(posOf), W, H);
+  const proj = (id: string) => projAll[nodeIds.indexOf(id)];
 
   function renderCards(): void {
     if (!card) {

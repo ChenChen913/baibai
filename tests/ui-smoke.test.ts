@@ -150,6 +150,32 @@ describe('各视图挂载不抛错且关键按钮可用', () => {
     expect(document.querySelectorAll('.merge-chip').length).toBe(7); // 8 → 7 户
   });
 
+  it('回顾视图：家/户标记不叠在一点（单点投影回归防护）', () => {
+    const deps = {
+      onBack: vi.fn(),
+      onSave: vi.fn(),
+      onOptimize: vi.fn(),
+      loadPlan: vi.fn(async () => undefined),
+      loadPrev: vi.fn(async () => undefined),
+    };
+    mountReviewView(makeRoot(), generateDemoSession(), deps);
+    const pts = [...document.querySelectorAll('#rv-svg .node circle')].map(
+      (c) => c.getAttribute('cx') + ',' + c.getAttribute('cy'),
+    );
+    expect(new Set(pts).size).toBeGreaterThanOrEqual(5); // demo 9 个标记应有不同坐标
+  });
+
+  it('三线对比视图：节点标记不叠在一点（单点投影回归防护）', () => {
+    vi.stubGlobal('requestAnimationFrame', () => 1);
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    const deps = { onBack: vi.fn() };
+    mountOptimizeView(makeRoot(), generateDemoSession(), deps);
+    const pts = [...document.querySelectorAll('#opt-svg g.node circle')].map(
+      (c) => c.getAttribute('cx') + ',' + c.getAttribute('cy'),
+    );
+    expect(new Set(pts).size).toBeGreaterThanOrEqual(5); // demo 8 户 + 家应有不同坐标
+  });
+
   it('三线对比视图：切标签与推演不抛错', () => {
     let rafCb: FrameRequestCallback | null = null;
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {

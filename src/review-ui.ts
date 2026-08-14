@@ -138,9 +138,11 @@ export function mountReviewView(
     const d = pl.pts
       .map((q, i) => `${i === 0 ? 'M' : 'L'}${q.x.toFixed(1)},${q.y.toFixed(1)}`)
       .join(' ');
+    // 家 + 全部户一起投影（单点投影会全部叠在左上角同一处）
+    const projAll = projectToView([s.home, ...s.nodes.map((n) => n.pos)], W, H);
     const nodeSvg = s.nodes
-      .map((n) => {
-        const pr = projectToView([n.pos], W, H)[0];
+      .map((n, i) => {
+        const pr = projAll[i + 1];
         return (
           `<g class="node"><circle cx="${pr.x.toFixed(1)}" cy="${pr.y.toFixed(1)}" r="9"/>` +
           `<text x="${pr.x.toFixed(1)}" y="${(pr.y - 14).toFixed(1)}">${esc(n.name || `户${n.autoNo}`)}</text></g>`
@@ -148,7 +150,7 @@ export function mountReviewView(
       })
       .join('');
     const homeSvg = (() => {
-      const pr = projectToView([s.home], W, H)[0];
+      const pr = projAll[0];
       return (
         `<g class="node home"><circle cx="${pr.x.toFixed(1)}" cy="${pr.y.toFixed(1)}" r="10"/>` +
         `<text x="${pr.x.toFixed(1)}" y="${(pr.y - 16).toFixed(1)}">家</text></g>`

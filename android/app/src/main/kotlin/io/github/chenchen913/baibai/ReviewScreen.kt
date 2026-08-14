@@ -208,12 +208,13 @@ fun ReviewScreen(
                             textAlign = Paint.Align.CENTER
                             isFakeBoldText = true
                         }
-                        fun project(p: LatLng) = Track.projectToView(listOf(p), W.toDouble(), H.toDouble())[0]
-                        val homeProj = project(s.home)
+                        // 家 + 全部户一起投影（单点投影会全部叠在左上角同一处）
+                        val projAll = Track.projectToView(listOf(s.home) + s.nodes.map { it.pos }, W.toDouble(), H.toDouble())
+                        val homeProj = projAll[0]
                         drawCircle(BaibaiAccent2, radius = 10f, center = Offset(homeProj.x.toFloat(), homeProj.y.toFloat()))
                         drawContext.canvas.nativeCanvas.drawText("家", homeProj.x.toFloat(), homeProj.y.toFloat() + homePaint.textSize * 0.35f, homePaint)
-                        s.nodes.forEach { n ->
-                            val pr = project(n.pos)
+                        s.nodes.forEachIndexed { i, n ->
+                            val pr = projAll[i + 1]
                             drawCircle(Color.White, radius = 9f, center = Offset(pr.x.toFloat(), pr.y.toFloat()))
                             drawCircle(BaibaiAccent, radius = 9f, style = Stroke(width = 2.5f), center = Offset(pr.x.toFloat(), pr.y.toFloat()))
                             drawContext.canvas.nativeCanvas.drawText(
