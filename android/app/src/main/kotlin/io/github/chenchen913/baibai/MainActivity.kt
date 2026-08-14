@@ -161,6 +161,15 @@ fun AppRoot() {
         }
     }
 
+        // 轻提示：底部居中、位于导航栏/手势条之上
+        SnackbarHost(
+            hostState = snackbar,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+        )
+    }
+
     // 崩溃恢复：检测到未完成检查点
     if (pendingRestore) {
         AlertDialog(
@@ -195,12 +204,4 @@ fun AppRoot() {
             },
         )
     }
-
-    // 轻提示：底部居中、位于导航栏/手势条之上
-    SnackbarHost(
-        hostState = snackbar,
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .navigationBarsPadding(),
-    )
 }
