@@ -159,7 +159,6 @@ fun AppRoot() {
                 )
             }
         }
-    }
 
         // 轻提示：底部居中、位于导航栏/手势条之上
         SnackbarHost(
