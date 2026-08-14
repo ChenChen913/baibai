@@ -48,7 +48,8 @@ npm test         # vitest 单元测试（111 项）
 
 ## 更新记录
 
-- A-M2 第 2 步（2026-08-14）：**A-M2 代码完成**——历史列表页、回顾页（Compose Canvas 回放动画：描边推进+光点+1x/2x/4x；收拾：改名/合并点选芯片/拆分/跳变剔除）、页面导航、结束拜年自动进回顾页；Robolectric 冒烟 3 项（改名/合并/剔除落盘）；Android CI 全绿（core 77 + app 8 = **85 项**）；APK 8.7MB。
+- A-M3 第 1 步（2026-08-14）：**core 直译完成**——`Tsp.kt`（Held-Karp 精确 n≤16 + 贪心/2-opt）、`Optimize.kt`（三线优化 + scorecard）、`Polyline.kt`（morph 数学）+ **19 项对照测试**；**昌乐县 15/20 户仿真移植，数值与网页版逐位一致**（15 户省 41.5% / 20 户省 33.3%）；修复边构造 map→mapIndexed 幽灵边 bug；Android CI 全绿（core 96 + app 8 = **104 项**）。
+- A-M2 第 2 步（2026-08-14）：**A-M2 代码完成**——历史列表页、回顾页（Canvas 回放动画 + 收拾工具）、页面导航；Android CI 全绿（85 项）。
 - A-M2 第 1 步（2026-08-14）：**core 直译完成**——Smooth/Track/Playback/Review/Demo + 39 项对照测试一次全绿。
 - A-M1 第 3 步（2026-08-14）：**前台服务落地，A-M1 代码完成**——四层防杀全部就位；Robolectric 测试增至 5 项；Android CI 全绿（43 项）。
 - A-M1 第 2 步（2026-08-14）：**app 层落地**——Compose 记录页、定位权限请求、省电白名单引导页、`RecorderHub` 全链路、`LocationSource` 抽象；Robolectric 集成测试 3 项；Android CI 全绿（41 项）。
