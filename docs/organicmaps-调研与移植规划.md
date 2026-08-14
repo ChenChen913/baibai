@@ -34,16 +34,20 @@
 ## 三、移植路线评估（A/B/C 三档）
 
 ### A 档：整库嵌入「Organic Maps SDK」
-OM 官方把安卓端拆成可发布 SDK（android/sdk，包名 app.organicmaps.sdk，另有官方示例仓 organicmaps/api-android）。
+OM 官方把安卓端拆成可发布 SDK（android/sdk，包名 app.organicmaps.sdk，另有官方示例仓 organicmaps/api-android），
+且**已通过 android/groovy/publishing.gradle 发布到 Maven Central**（POM 双许可：Apache-2.0 + Binary Data License）。
+因此 A 档有两条子路：
+- **A1 依赖官方 Maven artifact**（最省事）：gradle 直接引 app.organicmaps.sdk，不编译 C++；但需确认 artifact 的版本新鲜度与 arm64 覆盖，且仍要自己下载/分发 .mwm 数据 + 满足署名。
+- **A2 源码级整库编译**：整 C++ 核心（NDK 29.0.14206865 + CMake 3.22.1+ + JDK17 + AGP 9.2.1 + compileSdk 36 + ≥30GB 磁盘，冷编数十分钟~小时级；核心约 15 万行 C++、C++ 源码 12.6MB + 3party 11.3MB）；.so 15~25MB/ABI；运行时资产 World.mwm 61MB + 字体样式，**最小 APK ≈ 40~85MB**；山东省离线包另需下载 ~98MB。
 
 - **收益**：100% 离线矢量地图、自带轨迹录制、专业渲染与路网。
-- **成本**：整 C++ 核心编译（NDK 29.0.14206865 + CMake 3.22.1+ + JDK17 + ≥30GB 磁盘，冷编数十分钟~小时级；核心约 15 万行 C++）；.so 15~25MB/ABI；运行时资产 World.mwm 61MB + 字体样式，**最小 APK ≈ 40~85MB**；山东省离线包另需下载 ~98MB。
 - **合规**：代码可复用；但必须满足 ODbL 署名 + **禁止白标**（baibai 是个人玩具，署名没问题，但要接受"地图是 Organic Maps 提供的"品牌呈现）。
 - **风险**：依赖 OM 版本演进（.mwm 格式无公开文档、数据必须与 app 版本匹配）；baibai CI 构建时间暴涨；与 baibai 现有 Compose/AGP 工程整合成本高。
-- **结论**：工程量与维护代价对"个人拜年轨迹玩具"明显过重。**不推荐作为首选，但保留为远期可选项。**
+- **结论**：工程量与维护代价对"个人拜年轨迹玩具"明显过重。**不推荐作为首选；若将来真要嵌入式能力，A1（Maven artifact）优先于 A2（源码编译）。**
 
 ### B 档：剥离 drape 做"小渲染库"
 - **不可行**：最小切面仍有 ~15 万行 C++；drape 硬耦合 indexer/platform/geometry/coding/base + freetype/harfbuzz/ICU/expat；底图必须吃 .mwm；需 fork 仓库改 CMake 解耦。
+- **补充发现**：drape 是纯渲染层、不含地图语义；真正有意义的复用边界是更上层的 map（Framework 聚合类）——抽 drape 收益低、代价高。
 - **结论**：**否决**（两个子任务独立得出同一结论）。
 
 ### C 档：借"离线优先"思想 + 轻量引擎（推荐）
