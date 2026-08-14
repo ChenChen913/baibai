@@ -15,6 +15,7 @@ import type { SessionData } from './state.js';
 import {
   clearActive,
   exportAllJson,
+  importAllJson,
   listSessions,
   loadActive,
   loadPlan,
@@ -158,7 +159,9 @@ function mountRecord(): Ui {
       ui.toast(m === 'bike' ? '下一段将骑行前往，到户自动回走路' : '已切回步行');
     },
     onExport() {
-      void doExport();
+      void doExport()
+        .then(() => ui.toast('已导出备份 JSON'))
+        .catch((e: unknown) => ui.toast(e instanceof Error ? e.message : '导出失败'));
     },
     onHistory() {
       void showHistory();
@@ -246,7 +249,6 @@ async function doExport(): Promise<void> {
   a.download = `baibai-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  ui.toast('已导出备份 JSON');
 }
 
 function showReview(sess: SessionData): void {
@@ -291,11 +293,24 @@ async function showHistory(): Promise<void> {
   const sessions = (await listSessions()).sort((a, b) => b.createdAt - a.createdAt);
   app.innerHTML = `
     <div class="wrap">
-      <header><h1>🧧 历史记录</h1></header>
+      <header><h1>历史记录</h1></header>
       <button id="h-back" class="secondary">← 返回记录</button>
-      <button id="h-demo" class="secondary">🎲 生成演示数据</button>
+      <button id="h-demo" class="secondary">生成演示数据</button>
+      <div class="h-actions">
+        <button id="h-export" class="primary small">导出 JSON</button>
+        <button id="h-import" class="ghost small">导入 JSON</button>
+        <input id="h-file" type="file" accept="application/json,.json" style="display:none"/>
+      </div>
+      <p class="h-hint">导出/导入与安卓版同一格式：安卓记录 → 电脑复盘，或反之。</p>
       <div id="h-list" class="history-list"></div>
+      <div id="toast"></div>
     </div>`;
+  const toastEl = app.querySelector<HTMLElement>('#toast')!;
+  const toast = (msg: string): void => {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    window.setTimeout(() => toastEl.classList.remove('show'), 2400);
+  };
   app.querySelector<HTMLElement>('#h-back')!.addEventListener('click', () => {
     view = 'record';
     ui = mountRecord();
@@ -303,6 +318,27 @@ async function showHistory(): Promise<void> {
   app.querySelector<HTMLElement>('#h-demo')!.addEventListener('click', () => {
     // 演示会话不落库，仅在内存中回放/收拾
     showReview(generateDemoSession());
+  });
+  app.querySelector<HTMLElement>('#h-export')!.addEventListener('click', () => {
+    void doExport().catch((e: unknown) => toast(e instanceof Error ? e.message : '导出失败'));
+  });
+  const fileInput = app.querySelector<HTMLInputElement>('#h-file')!;
+  app.querySelector<HTMLElement>('#h-import')!.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      importAllJson(String(reader.result ?? ''))
+        .then(async (n) => {
+          toast(`已导入 ${n} 场拜年记录`);
+          await showHistory();
+        })
+        .catch((e: unknown) => toast(e instanceof Error ? e.message : '导入失败'));
+    };
+    reader.onerror = () => toast('读取文件失败');
+    reader.readAsText(f);
+    fileInput.value = '';
   });
   const list = app.querySelector<HTMLElement>('#h-list')!;
   list.innerHTML =
@@ -317,7 +353,7 @@ async function showHistory(): Promise<void> {
             } catch {
               stat = `${s.nodes.length} 户`;
             }
-            return `<button class="history-item" data-id="${s.id}">📅 ${s.date} · ${stat}</button>`;
+            return `<button class="history-item" data-id="${s.id}">${s.date} · ${stat}</button>`;
           })
           .join('');
   list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {

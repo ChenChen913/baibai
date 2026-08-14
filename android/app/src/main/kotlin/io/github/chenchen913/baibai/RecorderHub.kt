@@ -201,14 +201,26 @@ object RecorderHub {
             stopLocationSource()
             stopKeepAliveService()
             val saved = r.snapshot()
-            runCatching { store.saveSession(saved) }
-            runCatching { store.clearActive() }
-            recorder = null
-            _waiting.value = false
-            watchdogJob?.cancel()
-            vibrate()
-            _session.value = saved
-            emit("已保存本次拜年 🎉")
+            val saveOk = runCatching { store.saveSession(saved) }.isSuccess
+            if (saveOk) {
+                runCatching { store.clearActive() }
+                recorder = null
+                _waiting.value = false
+                watchdogJob?.cancel()
+                vibrate()
+                _session.value = saved
+                emit("已保存本次拜年 🎉")
+            } else {
+                // C-1 修复：保存失败绝不删检查点、绝不假装成功。
+                // 磁盘上的检查点仍是结束前的未完成状态（本函数不再 flush 结束态），
+                // 清空内存 recorder 后由「继续/放弃」弹窗恢复，用户可清理空间后重试结束。
+                recorder = null
+                _waiting.value = false
+                watchdogJob?.cancel()
+                _session.value = null
+                _pendingRestore.value = true
+                emit("保存失败：本场记录已保留为未完成记录，请清理存储空间后重试结束")
+            }
         } else if (res is FinishResult.TooFar) {
             _finishTooFar.value = res.distM // UI 弹"距 Home X 米，仍要结束？"
         }

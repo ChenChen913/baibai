@@ -142,6 +142,36 @@ button:disabled {
   border-color: transparent;
 }
 
+/* 历史页操作行（导出/导入） */
+.h-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.h-actions .primary.small,
+.h-actions .ghost.small {
+  width: auto;
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 14px;
+  letter-spacing: 0;
+  min-height: 48px;
+}
+
+.h-actions .ghost.small {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.h-hint {
+  font-size: 11px;
+  color: var(--ink);
+  opacity: 0.55;
+  margin: 8px 2px 14px;
+}
+
 #toast {
   position: fixed;
   left: 50%;
