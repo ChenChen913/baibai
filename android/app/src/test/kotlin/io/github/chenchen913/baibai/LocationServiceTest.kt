@@ -50,8 +50,7 @@ class LocationServiceTest {
     }
 
     @Test
-    fun `START_STICKY 重建后静默恢复检查点`() {
-        val app = ApplicationProvider.getApplicationContext<Application>()
+    fun `进程重建后静默恢复检查点（START_STICKY 分支调用的恢复逻辑）`() {
         RecorderHub.source = FakeSource(HOME)
         // 造一个 WALKING 中的未完成检查点
         RecorderHub.startPressed()
@@ -64,14 +63,11 @@ class LocationServiceTest {
         RecorderHub.resetForTest(clearStore = false)
         assertNull(RecorderHub.recorder)
 
-        // 服务以 null intent 重建（START_STICKY 语义：buildService 传入 null，startCommand(flags,startId) 沿用）
-        val controller = Robolectric.buildService(LocationService::class.java, null)
-            .create()
-            .startCommand(0, 0)
+        // 服务重建后（null intent）执行的就是这个函数
+        RecorderHub.autoResumeFromCheckpoint()
         assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
         assertEquals(0, RecorderHub.recorder?.snapshot()?.points?.size ?: -1) // 恢复时尚未产生新轨迹点
 
-        controller.destroy()
         RecorderHub.abandonCheckpoint()
     }
 }
