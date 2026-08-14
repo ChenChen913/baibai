@@ -348,6 +348,9 @@ export function mountReviewView(
 
   function tick(): void {
     const ms = Math.min(baseMs + (performance.now() - animStart) * speed, pl.totalMs);
+    // P10：视图被销毁后（如播放中返回），元素可能已不存在——安全早退，不再续帧
+    const prog = root.querySelector<HTMLElement>('#rv-progress');
+    if (!prog) return;
     const track = root.querySelector<SVGPathElement>('#rv-trackplay');
     const dot = root.querySelector<SVGCircleElement>('#rv-dot');
     if (track) {
@@ -360,7 +363,7 @@ export function mountReviewView(
       dot.setAttribute('cx', pos.x.toFixed(1));
       dot.setAttribute('cy', pos.y.toFixed(1));
     }
-    $('rv-progress').textContent = `${fmtDur(ms)} / ${fmtDur(pl.totalMs)} · ${speed}x`;
+    prog.textContent = `${fmtDur(ms)} / ${fmtDur(pl.totalMs)} · ${speed}x`;
     if (ms >= pl.totalMs) {
       stopAnim();
       baseMs = pl.totalMs;
@@ -369,8 +372,14 @@ export function mountReviewView(
     raf = requestAnimationFrame(tick);
   }
 
-  $('rv-back').addEventListener('click', () => deps.onBack());
-  $('rv-opt').addEventListener('click', () => deps.onOptimize(s));
+  $('rv-back').addEventListener('click', () => {
+    stopAnim(); // P10：离开页面前停止动画，防 rAF 泄漏
+    deps.onBack();
+  });
+  $('rv-opt').addEventListener('click', () => {
+    stopAnim(); // P10：同上
+    deps.onOptimize(s);
+  });
   $('rv-play').addEventListener('click', () => {
     if (pl.pts.length === 0) return;
     if (playing) {

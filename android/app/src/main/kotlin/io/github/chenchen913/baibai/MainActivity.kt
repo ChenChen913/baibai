@@ -1,9 +1,11 @@
 package io.github.chenchen913.baibai
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,11 +30,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        installCrashLogHandler() // M-4/D22.5：未捕获异常写日志，绝不静默崩溃
         RecorderHub.init(application)
         RecorderHub.boot()
         setContent {
@@ -41,6 +45,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun installCrashLogHandler() {
+        val logDir = File(filesDir, "logs").apply { mkdirs() }
+        val log = File(logDir, "crash.log")
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching {
+                log.appendText("${java.time.Instant.now()} thread=${t.name}\n${e.stackTraceToString()}\n\n")
+            }
+            prev?.uncaughtException(t, e)
+        }
+    }
+}
+
+/** 读取上次崩溃日志并清空；返回给用户看的提示文案（无日志返回 null） */
+private fun readCrashLogAndClear(ctx: Context): String? {
+    val log = File(ctx.filesDir, "logs/crash.log")
+    if (!log.exists() || log.length() == 0L) return null
+    val text = runCatching { log.readText() }.getOrNull() ?: return null
+    log.delete()
+    return if (text.isBlank()) null else "上次运行出现异常（日志已保留），如频繁发生请反馈"
 }
 
 private const val PREFS = "baibai_prefs"
@@ -69,6 +94,12 @@ fun AppRoot() {
     // toast 消息
     LaunchedEffect(Unit) {
         RecorderHub.messages.collect { snackbar.showSnackbar(it) }
+    }
+
+    // 上次崩溃提示（M-4）：读一次即清空日志
+    val crashMsg = remember { readCrashLogAndClear(ctx) }
+    LaunchedEffect(Unit) {
+        crashMsg?.let { snackbar.showSnackbar(it) }
     }
 
     // 结束拜年后自动进入回顾页（沿用网页版行为）
@@ -116,6 +147,15 @@ fun AppRoot() {
     }
 
     Box(Modifier.fillMaxSize()) {
+        // H-1：系统返回键/手势按页面栈返回（记录页为栈底，返回键交给系统=退出）
+        BackHandler(enabled = screen !is Screen.Record) {
+            screen = when (val cur = screen) {
+                is Screen.Review -> Screen.History
+                is Screen.Optimize -> Screen.Review(cur.session)
+                else -> Screen.Record
+            }
+        }
+
         when (screen) {
             is Screen.Record -> RecordScreen(
                 onStartRequest = { requestStart() },
@@ -146,7 +186,11 @@ fun AppRoot() {
                 ReviewScreen(
                     initial = reviewScreen.session,
                     onBack = { screen = Screen.History },
-                    onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
+                    onSave = { s2 ->
+                        runCatching { RecorderHub.store.saveSession(s2) }
+                        // H-4：把最新编辑结果回传，保证「三线对比」与返回都用最新数据
+                        screen = Screen.Review(s2)
+                    },
                     onOptimize = { screen = Screen.Optimize(reviewScreen.session) },
                 )
             }

@@ -74,11 +74,22 @@ class JsonStore(
         return json.decodeFromString(Plan.serializer(), f.readText())
     }
 
+    fun listPlans(): List<Plan> {
+        val d = File(dir, PLANS_DIR)
+        if (!d.exists()) return emptyList()
+        return d.listFiles { f -> f.isFile && f.name.endsWith(".json") }
+            ?.mapNotNull { f ->
+                runCatching { json.decodeFromString(Plan.serializer(), f.readText()) }
+                    .getOrNull()
+            }
+            ?: emptyList()
+    }
+
     fun clearPlan(year: Int) {
         File(dir, "$PLANS_DIR/$year.json").delete()
     }
 
-    /** 全量导出（换机备份 / 与网页版互通） */
+    /** 全量导出（换机备份 / 与网页版互通）：sessions + plans（清单） */
     fun exportAllJson(): String {
         val sessions = listSessions()
         val export = ExportFile(
@@ -86,14 +97,29 @@ class JsonStore(
             version = 1,
             exportedAt = java.time.Instant.now().toString(),
             sessions = sessions,
+            plans = listPlans(),
         )
         return json.encodeToString(ExportFile.serializer(), export)
     }
 
-    /** 全量导入（网页版导出文件 → 本机会话库）；返回导入会话数 */
+    private val safeId = Regex("^[A-Za-z0-9_-]+$")
+
+    /** 全量导入（网页版导出文件 → 本机会话库）；契约 §1：app/version 不符拒绝并提示；id 校验防路径穿越；返回导入会话数 */
     fun importAllJson(text: String): Int {
         val export = json.decodeFromString(ExportFile.serializer(), text)
-        export.sessions.forEach { saveSession(it) }
+        if (export.app != "baibai") {
+            throw IllegalArgumentException("这不是拜拜的备份文件，无法导入")
+        }
+        if (export.version != 1) {
+            throw IllegalArgumentException("备份版本不兼容，请先升级应用后再导入")
+        }
+        export.sessions.forEach { s ->
+            if (!safeId.matches(s.id)) {
+                throw IllegalArgumentException("备份中存在不合法的会话 id：${s.id}，已拒绝导入")
+            }
+            saveSession(s)
+        }
+        export.plans.forEach { savePlan(it) }
         return export.sessions.size
     }
 

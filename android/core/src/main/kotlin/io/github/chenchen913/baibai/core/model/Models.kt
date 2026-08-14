@@ -122,4 +122,5 @@ data class ExportFile(
     val version: Int,
     val exportedAt: String,
     val sessions: List<SessionData>,
+    val plans: List<Plan> = emptyList(),
 )

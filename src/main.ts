@@ -10,7 +10,7 @@ import { mountReviewView } from './review-ui.js';
 import { mountOptimizeView } from './optimize-ui.js';
 import { mountPlanView } from './plan-ui.js';
 import { generateDemoSession } from './demo.js';
-import { scorecard, optimizeSession } from './optimize.js';
+import { analyze, analyzeSync, type AnalyzeResult } from './compute.js';
 import type { SessionData } from './state.js';
 import {
   clearActive,
@@ -341,27 +341,44 @@ async function showHistory(): Promise<void> {
     fileInput.value = '';
   });
   const list = app.querySelector<HTMLElement>('#h-list')!;
-  list.innerHTML =
-    sessions.length === 0
-      ? '<p class="empty">还没有记录。大年初一，出发！</p>'
-      : sessions
-          .map((s) => {
-            let stat: string;
-            try {
-              const c = scorecard(s, optimizeSession(s));
-              stat = `${s.nodes.length} 户 · ${(c.actualDistM / 1000).toFixed(2)} km · 绕路率 ${c.savingsTimePct.toFixed(0)}%`;
-            } catch {
-              stat = `${s.nodes.length} 户`;
-            }
-            return `<button class="history-item" data-id="${s.id}">${s.date} · ${stat}</button>`;
-          })
-          .join('');
+  if (sessions.length === 0) {
+    list.innerHTML = '<p class="empty">还没有记录。大年初一，出发！</p>';
+  } else {
+    list.innerHTML = sessions
+      .map((s) => `<button class="history-item" data-id="${s.id}">${s.date} · 计算中…</button>`)
+      .join('');
+    sessions.forEach((s) => {
+      void statFor(s).then((stat) => {
+        const el = list.querySelector<HTMLElement>(`[data-id="${s.id}"]`);
+        if (el) el.textContent = `${s.date} · ${stat}`;
+      });
+    });
+  }
   list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {
     b.addEventListener('click', () => {
       const sess = sessions.find((x) => x.id === b.dataset.id);
       if (sess) showReview(sess);
     });
   });
+}
+
+/** 会话统计（D22.1 Worker 化 + P26 内存缓存：同一会话多次进历史不重算） */
+const analyzeCache = new Map<string, AnalyzeResult>();
+
+function statFor(s: SessionData): Promise<string> {
+  const statOf = (ar: AnalyzeResult): string =>
+    `${s.nodes.length} 户 · ${(ar.card.actualDistM / 1000).toFixed(2)} km · 绕路率 ${ar.card.savingsTimePct.toFixed(0)}%`;
+  const key = `${s.id}:${s.updatedAt}`;
+  const hit = analyzeCache.get(key);
+  if (hit) return Promise.resolve(statOf(hit));
+  const fill = (ar: AnalyzeResult): string => {
+    analyzeCache.set(key, ar);
+    return statOf(ar);
+  };
+  if (typeof Worker === 'undefined') {
+    return Promise.resolve(fill(analyzeSync(s)));
+  }
+  return analyze(s).then(fill).catch(() => `${s.nodes.length} 户`);
 }
 
 async function boot(): Promise<void> {
@@ -405,3 +422,26 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       .catch((e) => console.warn('[sw]', e));
   });
 }
+
+// D22.5 全局错误边界：未捕获异常写日志 + 提示，绝不静默冻结（P3）
+function reportUncaught(kind: string, detail: string): void {
+  console.error(`[baibai][${kind}]`, detail);
+  try {
+    localStorage.setItem('baibai_last_error', `${new Date().toISOString()} ${kind}: ${detail}`);
+  } catch {
+    /* 存储不可用则忽略 */
+  }
+  try {
+    ui.toast('出现异常：请稍后重试，必要时刷新页面（进行中的记录不会丢失）');
+  } catch {
+    /* 视图上无 toast 元素时忽略 */
+  }
+}
+
+window.addEventListener('error', (e) => {
+  reportUncaught('error', e.error instanceof Error ? e.error.stack ?? e.message : e.message);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  reportUncaught('unhandledrejection', e.reason instanceof Error ? e.reason.stack ?? e.reason.message : String(e.reason));
+});

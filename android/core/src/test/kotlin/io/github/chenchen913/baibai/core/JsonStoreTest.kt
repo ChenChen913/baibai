@@ -1,6 +1,8 @@
 package io.github.chenchen913.baibai.core
 
 import io.github.chenchen913.baibai.core.model.LatLng
+import io.github.chenchen913.baibai.core.model.Plan
+import io.github.chenchen913.baibai.core.model.PlanItem
 import io.github.chenchen913.baibai.core.state.RecorderState
 import io.github.chenchen913.baibai.core.store.JsonStore
 import kotlinx.serialization.json.jsonArray
@@ -8,6 +10,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -90,5 +93,41 @@ class JsonStoreTest {
         val n = store2.importAllJson(json)
         assertEquals(1, n)
         assertEquals(s, store2.listSessions().first())
+    }
+
+    @Test
+    fun `导出含清单且导入往返恢复清单`() {
+        val store = JsonStore(tmp)
+        store.savePlan(Plan(2026, listOf(PlanItem("大伯家", null)), 0, 0))
+        val json = store.exportAllJson()
+
+        val store2 = JsonStore(File(tmp, "other"))
+        store2.importAllJson(json)
+        assertEquals("大伯家", store2.loadPlan(2026)?.items?.first()?.name)
+        assertNull(store2.loadPlan(2026)?.items?.first()?.pos)
+    }
+
+    @Test
+    fun `导入拒绝：app 不是 baibai`() {
+        val store = JsonStore(tmp)
+        val bad = """{"app":"other","version":1,"exportedAt":"","sessions":[]}"""
+        assertThrows(IllegalArgumentException::class.java) { store.importAllJson(bad) }
+    }
+
+    @Test
+    fun `导入拒绝：version 不符`() {
+        val store = JsonStore(tmp)
+        val bad = """{"app":"baibai","version":2,"exportedAt":"","sessions":[]}"""
+        assertThrows(IllegalArgumentException::class.java) { store.importAllJson(bad) }
+    }
+
+    @Test
+    fun `导入拒绝：路径穿越 id`() {
+        val store = JsonStore(tmp)
+        val bad =
+            """{"app":"baibai","version":1,"exportedAt":"","sessions":[{"id":"../checkpoint","year":2026,"date":"2026-01-01","home":{"lat":0.0,"lng":0.0},"nodes":[],"visits":[],"points":[],"state":"IDLE","currentMode":"walk","finished":false,"createdAt":0,"updatedAt":0}]}"""
+        assertThrows(IllegalArgumentException::class.java) { store.importAllJson(bad) }
+        // 未写入任何文件（穿越被拦截）
+        assertEquals(emptyList<String>(), store.listSessions().map { it.id })
     }
 }

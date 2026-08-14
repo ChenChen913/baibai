@@ -282,7 +282,8 @@ fun ReviewScreen(
                 Spacer(Modifier.height(16.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     s.nodes.forEach { n ->
-                        var nameText by remember(n.id) { mutableStateOf(n.name) }
+                        // M-12：键含 name——套名/改名后输入框立即刷新
+                        var nameText by remember(n.id, n.name) { mutableStateOf(n.name) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 "%02d".format(n.autoNo),

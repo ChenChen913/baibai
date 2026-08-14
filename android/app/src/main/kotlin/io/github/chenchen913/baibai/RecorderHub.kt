@@ -78,8 +78,9 @@ object RecorderHub {
         }
     }
 
-    /** 启动检查：发现未完成检查点 → 弹"继续/放弃" */
+    /** 启动检查：发现未完成检查点 → 弹"继续/放弃"。H-2：已在记录的进程内（如旋转重建）不再重复弹窗 */
     fun boot() {
+        if (recorder != null) return
         val ck = runCatching { store.loadActive() }.getOrNull()
         if (ck != null && !ck.session.finished) {
             _pendingRestore.value = true

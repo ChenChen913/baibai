@@ -1,15 +1,15 @@
-/** 三线对比视图（M3 UI）：成绩单 + 三线推演动画 + 压轴 morph（D7/U1/U3/F-14） */
+/** 三线对比视图（M3 UI）：成绩单 + 三线推演动画 + 压轴 morph（D7/U1/U3/F-14）
+ * D22.1：重计算（TSP/成绩单/回放计划/morph 重采样）经 compute.ts 走 Worker，无 Worker 环境同步回退 */
 
 import type { SessionData } from './state.js';
-import { buildPlan } from './playback.js';
-import { optimizeSession, scorecard, type Route } from './optimize.js';
 import { projectToView } from './track.js';
-import { lerpPolyline, resamplePolyline, routePolyline, type XY } from './polyline.js';
+import { lerpPolyline, type XY } from './polyline.js';
+import type { Route } from './optimize.js';
+import { analyze, analyzeSync, morph, morphSync, type Card } from './compute.js';
 import { ICONS } from './icons.js';
 
 const W = 480;
 const H = 560;
-const MORPH_POINTS = 180;
 const MORPH_MS = 3000;
 
 type Tab = 'walk_time' | 'walk_dist' | 'fly';
@@ -34,9 +34,12 @@ export function mountOptimizeView(
   s: SessionData,
   deps: OptimizeDeps,
 ): void {
-  const routes = optimizeSession(s);
-  const card = scorecard(s, routes);
-  const plan = buildPlan(s, W, H);
+  let ready = false;
+  let routes: Route[] = [];
+  let card: Card | null = null;
+  let planPts: XY[] = [];
+  let actualRes: XY[] = [];
+  let flyRes: XY[] = [];
 
   let tab: Tab = 'walk_time';
   let revealK = 0; // 已点亮边数
@@ -75,15 +78,11 @@ export function mountOptimizeView(
     id === 'home' ? s.home : s.nodes.find((n) => n.id === id)!.pos;
   const proj = (id: string) => projectToView([posOf(id)], W, H)[0];
 
-  // morph 端点：实走路径与飞行星形（同点数重采样）
-  const actualXY: XY[] = plan.pts.map((p) => ({ x: p.x, y: p.y }));
-  const flyRoute = routes.find((r) => r.mode === 'fly')!;
-  const flyLatLng = routePolyline(s, flyRoute.order);
-  const flyXY = projectToView(flyLatLng, W, H);
-  const actualRes = resamplePolyline(actualXY, MORPH_POINTS);
-  const flyRes = resamplePolyline(flyXY, MORPH_POINTS);
-
   function renderCards(): void {
+    if (!card) {
+      $('opt-cards').innerHTML = '<p class="empty">计算中…</p>';
+      return;
+    }
     $('opt-cards').innerHTML = `
       <div class="card">
         <span>🧧 今年实走</span>
@@ -108,11 +107,12 @@ export function mountOptimizeView(
   }
 
   function renderSvg(): void {
+    if (!ready) return;
     const r = route();
     const meta = TAB_META[tab];
     const actualOpacity =
       morphT !== null ? Math.max(0, 1 - morphT) * 0.45 : 0.3;
-    const actualD = plan.pts
+    const actualD = planPts
       .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
       .join(' ');
 
@@ -158,11 +158,12 @@ export function mountOptimizeView(
   }
 
   function renderHint(): void {
+    if (!ready) return;
     const r = route();
     const unknown = r.edges.filter((e) => !e.known).length;
     $('opt-hint').textContent =
       tab === 'fly'
-        ? '飞行视角：直线距离，纯几何幻想 ✨'
+        ? '飞行视角：直线距离，纯几何幻想'
         : `虚线 = 今年没走过的路段（估算）${unknown > 0 ? ` · ${unknown} 段` : ''}；实线 = 实走数据`;
   }
 
@@ -187,6 +188,7 @@ export function mountOptimizeView(
   }
 
   function playReveal(): void {
+    if (!ready) return;
     stopAnim();
     morphT = null;
     revealK = 0;
@@ -207,12 +209,14 @@ export function mountOptimizeView(
   }
 
   function playMorph(): void {
-    if (plan.pts.length < 2 || flyRes.length < 2) return;
+    if (!ready || planPts.length < 2 || flyRes.length < 2) return;
     stopAnim();
     revealK = route().edges.length;
     morphT = 0;
     const t0 = performance.now();
-    const ease = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+    // §9 红线：easeInOutCubic（P8 修复）
+    const ease = (t: number): number =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     const loop = (): void => {
       const f = Math.min(1, (performance.now() - t0) / MORPH_MS);
       morphT = ease(f);
@@ -239,6 +243,7 @@ export function mountOptimizeView(
   });
 
   function switchTab(t: Tab): void {
+    if (!ready) return;
     stopAnim();
     tab = t;
     morphT = null;
@@ -246,6 +251,25 @@ export function mountOptimizeView(
     renderAll();
   }
 
-  revealK = route().edges.length;
-  renderAll();
+  function applyResult(ar: { routes: Route[]; card: Card; planPts: XY[] }, mr: { actualRes: XY[]; flyRes: XY[] }): void {
+    routes = ar.routes;
+    card = ar.card;
+    planPts = ar.planPts;
+    actualRes = mr.actualRes;
+    flyRes = mr.flyRes;
+    ready = true;
+    revealK = route().edges.length;
+    renderAll();
+  }
+
+  if (typeof Worker === 'undefined') {
+    // 无 Worker 环境（jsdom 测试等）：同步回退，保证挂载后立即可交互
+    const ar = analyzeSync(s);
+    applyResult(ar, morphSync(s, ar.routes));
+  } else {
+    void analyze(s).then((ar) => {
+      void morph(s, ar.routes).then((mr) => applyResult(ar, mr));
+    });
+  }
+  renderCards();
 }
