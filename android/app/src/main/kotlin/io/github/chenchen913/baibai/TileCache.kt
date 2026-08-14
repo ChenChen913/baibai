@@ -112,8 +112,10 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
     private fun httpGet(url: String): ByteArray? {
         val conn = runCatching {
             (URL(url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 5000
-                readTimeout = 8000
+                // shouldInterceptRequest 同步调用本方法（P3 改回同步注入字节）：
+                // 超时收紧到 4s/5s，死网络下尽快失败，让 tileerror→OSM 回退早触发，避免长时间占住 WebView 网络线程
+                connectTimeout = 4000
+                readTimeout = 5000
                 setRequestProperty("User-Agent", userAgent)
                 // P5：高德瓦片带 Referer，贴近网页端调用习惯，降低风控风险
                 if (url.contains("is.autonavi.com")) {

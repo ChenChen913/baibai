@@ -646,10 +646,12 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 )
                             }
 
-                            // P0 缓存 + P1/P2/P3 修复：
-                            // - 命中缓存 → 立即返回（MIME 按 URL 判定：style=6 卫星实为 JPEG，P2）；
-                            // - 未命中 → 异步回填缓存并返回 null 放行 WebView 自取（并发快、自带重试，P3），
-                            //   绝不在此线程做同步 HTTP，避免 WebView 网络线程池被占死、被预载饿死（P1）。
+                            // 瓦片统一走 TileCache.download（缓存优先→网络下载）并通过 WebResourceResponse
+                            // 注入字节给 <img>。这是最可靠路径：字节在网络层注入，绕过 file:// origin 对
+                            // 跨域 https 子资源的任何限制（部分国产 ROM 的 WebView 从 file:// 自取 https 瓦片不稳，
+                            // 故不采用“返回 null 让 WebView 自取”的方案）。
+                            // P1 已拆锁：单 key 锁 + 预载走独立线程池，此处同步下载不会饿死其他瓦片请求。
+                            // P2：MIME 按 URL 判定（style=6 卫星实为 JPEG）。
                             override fun shouldInterceptRequest(
                                 view: WebView?,
                                 request: WebResourceRequest?,
@@ -658,16 +660,7 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 val isTile = u.contains("is.autonavi.com/appmaptile") ||
                                     u.contains("tile.openstreetmap.org")
                                 if (!isTile) return null
-                                val bytes = tileCache.get(u)
-                                if (bytes == null) {
-                                    // 放行后由 WebView 直连拉取：UA 已与缓存侧统一；Referer 无法在直连路径追加，
-                                    // 实测高德/OSM 对无 Referer 的浏览器 UA 放行（审核报告 §四），风险可控
-                                    Log.i(MAP_LOG, "瓦片未命中缓存，异步回填：" + u)
-                                    scope.launch(Dispatchers.IO) {
-                                        runCatching { tileCache.download(u) }
-                                    }
-                                    return null // 让 WebView 自取（并发 + 自带重试）
-                                }
+                                val bytes = tileCache.download(u) ?: return null // 下载失败→放行 WebView 自取兜底
                                 val mime = if (u.contains("style=6")) "image/jpeg" else "image/png"
                                 return WebResourceResponse(
                                     mime,

@@ -40,10 +40,20 @@
   }
   .map-error-card b { color:#C8402F; }
   .map-error-card .hint { font-size:11px; font-weight:500; opacity:.7; }
+  /* 诊断徽标（左上角）：真机无需 logcat 即可看到瓦片加载状态，定位"地图不显示"根因 */
+  .map-debug {
+    position:absolute; left:8px; top:8px; z-index:1500;
+    background:rgba(255,255,255,.92); color:#5A3A2A; border:1px solid rgba(90,58,42,.18);
+    border-radius:8px; padding:4px 8px; font-size:10px; font-weight:700; line-height:1.5;
+    font-family:monospace; max-width:60%; word-break:break-all; pointer-events:none;
+    box-shadow:0 1px 4px rgba(90,58,42,.12);
+  }
+  .map-debug .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<div id="map-debug" class="map-debug"><span class="dot" style="background:#999"></span>页面加载中…</div>
 <div class="layer-switch">
   <button id="btn-street" class="on">地图</button>
   <button id="btn-sat">卫星</button>
@@ -100,6 +110,20 @@
   var street = null, sat = null, curLayer = 'street';
   var streetSrc = 0, streetErr = 0, satErr = 0;
 
+  /* ---------- 诊断徽标（真机可见，定位"地图不显示"根因，无需 logcat） ---------- */
+  var dbg = { ok: 0, fail: 0, src: '高德', layer: 'street', t0: Date.now() };
+  var dbgEl = document.getElementById('map-debug');
+  function dbgDot(color) { return '<span class="dot" style="background:' + color + '"></span>'; }
+  function updateDebug(status) {
+    if (!dbgEl) return;
+    var color = dbg.fail > 0 && dbg.ok === 0 ? '#C8402F' : (dbg.ok > 0 ? '#3DA35D' : '#E8A23D');
+    var src = dbg.layer === 'sat' ? '卫星' : dbg.src;
+    var line = dbgDot(color) + src + ' ' + (status || (dbg.ok > 0 ? '加载中' : '等待')) +
+      ' | OK ' + dbg.ok + ' 失败 ' + dbg.fail;
+    dbgEl.innerHTML = line;
+  }
+  updateDebug('页面已加载·等待瓦片');
+
   /* ---------- P6：地图失败可见兜底（高德+OSM 均失败时显示，替代"无声空白"） ---------- */
   var mapErrorEl = document.getElementById('map-error');
   var mapErrorShown = false;
@@ -126,18 +150,21 @@
     // P4：成功/失败都打日志；成功即重置错误计数并隐藏兜底浮层（P6）
     layer.on('tileload', function () {
       streetErr = 0;
+      dbg.ok++; updateDebug();
       // 街道层（高德或 OSM）瓦片成功即表示底图可用，隐藏兜底浮层——
       // 不能只看 streetSrc===1，否则"卫星失败→切回高德街道成功"后浮层会永远不消失
       if (curLayer === 'street') hideMapError();
     });
     layer.on('tileerror', function (e) {
       streetErr += 1;
+      dbg.fail++; updateDebug();
       console.warn('[BaibaiMap] 街道瓦片失败 #' + streetErr + '：' +
         (e && e.tile && e.tile.src ? e.tile.src : 'unknown'));
       if (streetErr > 6 && streetSrc === 0) {
         console.warn('[BaibaiMap] 高德街道瓦片连续失败，回退 OSM');
         streetSrc = 1;
         streetErr = 0;
+        dbg.src = 'OSM'; updateDebug('回退OSM');
         useGcj = false; // OSM 是 WGS-84，切回原坐标
         map.removeLayer(layer);
         makeStreet();
@@ -158,10 +185,12 @@
     // P4：卫星层无兜底源，失败打日志；连续失败且当前在卫星层时显示兜底浮层（P6）
     sat.on('tileload', function () {
       satErr = 0;
+      dbg.ok++; updateDebug();
       if (curLayer === 'sat') hideMapError();
     });
     sat.on('tileerror', function (e) {
       satErr += 1;
+      dbg.fail++; updateDebug();
       console.warn('[BaibaiMap] 卫星瓦片失败 #' + satErr + '：' +
         (e && e.tile && e.tile.src ? e.tile.src : 'unknown'));
       if (satErr > 6 && curLayer === 'sat') showMapError();
@@ -180,12 +209,14 @@
     if (sat && map.hasLayer(sat)) map.removeLayer(sat);
     if (street) street.addTo(map);
     curLayer = 'street';
+    dbg.layer = 'street'; updateDebug('切街道');
     syncButtons();
   });
   document.getElementById('btn-sat').addEventListener('click', function () {
     if (street && map.hasLayer(street)) map.removeLayer(street);
     if (sat) sat.addTo(map);
     curLayer = 'sat';
+    dbg.layer = 'sat'; updateDebug('切卫星');
     syncButtons();
   });
 
