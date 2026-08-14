@@ -6,7 +6,7 @@ import io.github.chenchen913.baibai.core.model.PlanItem
 import io.github.chenchen913.baibai.core.store.JsonStore
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Before
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -19,7 +19,7 @@ class PlanStoreTest {
 
     private lateinit var store: JsonStore
 
-    @Before
+    @BeforeEach
     fun setUp() {
         store = JsonStore(tmp)
     }
