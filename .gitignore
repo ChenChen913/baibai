@@ -3,6 +3,9 @@ dist/
 *.log
 .DS_Store
 
+# 参考项目（调研用，不随 baibai 提交）
+organicmaps-master/
+
 # Android（Gradle）
 android/.gradle/
 android/**/build/
