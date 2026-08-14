@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -89,6 +90,7 @@ private val GlassCardBorder = Color(0x66FFFFFF) // 白 40%
 /** 记录页（原始需求 §7.1）：
  * 品牌栏 → 状态大卡 → 实时地图卡（可折叠，展开约屏高 30~35%）→ 主按钮区 → 工具条。
  * 上部滚动、底部主按钮区+工具条固定于拇指热区；安全区由 BaibaiPage 统一处理。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -> Unit) {
     val session by RecorderHub.session.collectAsState()

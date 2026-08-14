@@ -96,7 +96,7 @@
         if (p && isFinite(p[0]) && isFinite(p[1])) trackPts.push([p[0], p[1]]);
       }
       track.setLatLngs(trackPts);
-      if (trackPts.length > 0) {
+      if (trackPts.length > 1) {
         map.fitBounds(L.latLngBounds(trackPts).pad(0.25));
       }
     },
