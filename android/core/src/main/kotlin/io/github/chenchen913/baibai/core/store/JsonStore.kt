@@ -74,6 +74,10 @@ class JsonStore(
         return json.decodeFromString(Plan.serializer(), f.readText())
     }
 
+    fun clearPlan(year: Int) {
+        File(dir, "$PLANS_DIR/$year.json").delete()
+    }
+
     /** 全量导出（换机备份 / 与网页版互通） */
     fun exportAllJson(): String {
         val sessions = listSessions()
