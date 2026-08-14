@@ -42,7 +42,7 @@ OM 官方把安卓端拆成可发布 SDK（android/sdk，包名 app.organicmaps.
 
 - **收益**：100% 离线矢量地图、自带轨迹录制、专业渲染与路网。
 - **合规**：代码可复用；但必须满足 ODbL 署名 + **禁止白标**（baibai 是个人玩具，署名没问题，但要接受"地图是 Organic Maps 提供的"品牌呈现）。
-- **风险**：依赖 OM 版本演进（.mwm 格式无公开文档、数据必须与 app 版本匹配）；baibai CI 构建时间暴涨；与 baibai 现有 Compose/AGP 工程整合成本高。
+- **风险**：依赖 OM 版本演进（.mwm 格式无公开文档、数据必须与 app 版本匹配）；baibai CI 构建时间暴涨；与 baibai 现有 Compose/AGP 工程整合成本高。另有两个工程细节：① 底图改为首启下载后最小单 ABI APK 可降到 **20~30MB**（内置则 40~85MB）；② 引擎初始化有严格顺序约束（先 setupWidgets 注入布局、LocationHelper 必须先于引擎创建，否则 ASSERT）。
 - **结论**：工程量与维护代价对"个人拜年轨迹玩具"明显过重。**不推荐作为首选；若将来真要嵌入式能力，A1（Maven artifact）优先于 A2（源码编译）。**
 
 ### B 档：剥离 drape 做"小渲染库"
