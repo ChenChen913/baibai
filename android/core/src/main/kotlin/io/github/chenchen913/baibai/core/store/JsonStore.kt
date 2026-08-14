@@ -90,7 +90,8 @@ class JsonStore(
         f.parentFile?.mkdirs()
         val tmp = File(f.parentFile, f.name + ".tmp")
         tmp.writeText(content)
-        FileOutputStream(tmp).use { it.fd.sync() }
+        // 注意：append=true 关键——默认构造会截断文件（清空刚写的内容），这里只为 fsync
+        FileOutputStream(tmp, true).use { it.fd.sync() }
         if (!tmp.renameTo(f)) {
             f.delete()
             if (!tmp.renameTo(f)) {

@@ -24,7 +24,7 @@ jobs:
             echo "Gradle 工程尚未初始化（仅文档变更），跳过构建"
           fi
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         if: steps.check.outputs.ready == 'true'
         with:
           distribution: temurin
