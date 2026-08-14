@@ -1,16 +1,143 @@
 package io.github.chenchen913.baibai
 
-import android.app.Activity
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import kotlin.math.roundToInt
 
-/** A-M1 占位入口：后续里程碑替换为 Compose 驾驶舱 + 前台服务接线 */
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(TextView(this).apply {
-            text = "拜拜 · A-M1 开发中（记录闭环）"
-            textSize = 18f
-        })
+        RecorderHub.init(application)
+        RecorderHub.boot()
+        setContent {
+            BaibaiTheme {
+                AppRoot()
+            }
+        }
     }
+}
+
+private const val PREFS = "baibai_prefs"
+private const val KEY_WHITELIST_SEEN = "whitelist_seen"
+
+@Composable
+fun AppRoot() {
+    val ctx = LocalContext.current
+    val snackbar = remember { SnackbarHostState() }
+    val prefs = remember { ctx.getSharedPreferences(PREFS, 0) }
+
+    val pendingRestore by RecorderHub.pendingRestore.collectAsState()
+    val finishTooFar by RecorderHub.finishTooFar.collectAsState()
+    var showWhitelist by remember { mutableStateOf(false) }
+
+    // toast 消息
+    LaunchedEffect(Unit) {
+        RecorderHub.messages.collect { snackbar.showSnackbar(it) }
+    }
+
+    // 权限请求（定位 + 通知）
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val locOk = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (locOk) {
+            RecorderHub.startPressed()
+        } else {
+            RecorderHub.handleGpsError(io.github.chenchen913.baibai.core.errors.GpsErrorKind.DENIED)
+        }
+    }
+
+    fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    fun requestStart() {
+        if (!prefs.getBoolean(KEY_WHITELIST_SEEN, false)) {
+            showWhitelist = true // 首次开始前引导白名单（第三层防杀）
+            return
+        }
+        if (!hasLocationPermission()) {
+            permLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ),
+            )
+            return
+        }
+        RecorderHub.startPressed()
+    }
+
+    if (showWhitelist) {
+        WhitelistGuideScreen(
+            onDone = {
+                prefs.edit().putBoolean(KEY_WHITELIST_SEEN, true).apply()
+                showWhitelist = false
+                requestStart()
+            },
+        )
+    } else {
+        RecordScreen(onStartRequest = { requestStart() })
+    }
+
+    // 崩溃恢复：检测到未完成检查点
+    if (pendingRestore) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("检测到未完成的拜年记录") },
+            text = { Text("继续记录，还是放弃？") },
+            confirmButton = {
+                TextButton(onClick = { RecorderHub.resumeCheckpoint() }) { Text("继续") }
+            },
+            dismissButton = {
+                TextButton(onClick = { RecorderHub.abandonCheckpoint() }) { Text("放弃") }
+            },
+        )
+    }
+
+    // 距 Home 太远时强制结束确认（D10）
+    finishTooFar?.let { dist ->
+        AlertDialog(
+            onDismissRequest = { RecorderHub.dismissFinishTooFar() },
+            title = { Text("距 Home 约 ${dist.roundToInt()} 米") },
+            text = { Text("当前位置离出发点较远，仍要结束本次拜年吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        RecorderHub.dismissFinishTooFar()
+                        RecorderHub.finishPressed(force = true)
+                    },
+                ) { Text("强制结束") }
+            },
+            dismissButton = {
+                TextButton(onClick = { RecorderHub.dismissFinishTooFar() }) { Text("取消") }
+            },
+        )
+    }
+
+    SnackbarHost(hostState = snackbar, modifier = Modifier)
 }

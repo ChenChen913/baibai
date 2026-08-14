@@ -1,0 +1,297 @@
+package io.github.chenchen913.baibai
+
+import android.app.Application
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import io.github.chenchen913.baibai.core.errors.GpsErrorKind
+import io.github.chenchen913.baibai.core.model.Fix
+import io.github.chenchen913.baibai.core.model.Mode
+import io.github.chenchen913.baibai.core.model.SessionData
+import io.github.chenchen913.baibai.core.state.FinishResult
+import io.github.chenchen913.baibai.core.state.RecorderState
+import io.github.chenchen913.baibai.core.store.JsonStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+/**
+ * 全局记录中枢（对应网页版 main.ts 的职责）。
+ * 定位回调线程与 UI 线程都经过这里；RecorderState 自带 @Synchronized 保证并发安全。
+ * A-M1 第 2 步会把定位迁入前台服务（锁屏持续），本类接口不变。
+ */
+object RecorderHub {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _session = MutableStateFlow<SessionData?>(null)
+    val session: StateFlow<SessionData?> = _session
+
+    private val _waiting = MutableStateFlow(false) // 开始拜年后等待首个定位
+    val waiting: StateFlow<Boolean> = _waiting
+
+    private val _gpsAcc = MutableStateFlow<Double?>(null)
+    val gpsAcc: StateFlow<Double?> = _gpsAcc
+
+    private val _pendingRestore = MutableStateFlow(false)
+    val pendingRestore: StateFlow<Boolean> = _pendingRestore
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: MutableSharedFlow<String> = _messages
+
+    private val _finishTooFar = MutableStateFlow<Double?>(null)
+    val finishTooFar: StateFlow<Double?> = _finishTooFar
+
+    lateinit var store: JsonStore
+        private set
+    var source: LocationSource? = null // 测试可注入 FakeSource
+    var recorder: RecorderState? = null
+        private set
+
+    private var context: Context? = null
+    private var watchdogJob: Job? = null
+    private var flushTimerStarted = false
+
+    fun init(app: Application) {
+        if (this::store.isInitialized) return
+        context = app.applicationContext
+        store = JsonStore(app.filesDir)
+        source = SystemLocationSource(app.applicationContext)
+        // D22：每 10s 检查点落盘
+        if (!flushTimerStarted) {
+            flushTimerStarted = true
+            scope.launch {
+                while (true) {
+                    delay(10_000)
+                    flushNow()
+                }
+            }
+        }
+    }
+
+    /** 启动检查：发现未完成检查点 → 弹"继续/放弃" */
+    fun boot() {
+        val ck = runCatching { store.loadActive() }.getOrNull()
+        if (ck != null && !ck.session.finished) {
+            _pendingRestore.value = true
+            _session.value = ck.session
+        }
+    }
+
+    fun resumeCheckpoint() {
+        val ck = runCatching { store.loadActive() }.getOrNull() ?: return
+        recorder = RecorderState.restore(ck)
+        _session.value = recorder?.snapshot()
+        _pendingRestore.value = false
+        _gpsAcc.value = source?.lastFix?.acc
+        if (recorder?.currentState == io.github.chenchen913.baibai.core.model.SessionState.WALKING) {
+            startSourceIfNeeded()
+        }
+    }
+
+    fun abandonCheckpoint() {
+        runCatching { store.clearActive() }
+        _pendingRestore.value = false
+        _session.value = null
+    }
+
+    // ---------- 按钮动作（UI 线程） ----------
+
+    fun startPressed() {
+        if (recorder != null) return
+        _waiting.value = true
+        startSourceIfNeeded()
+        vibrate()
+        emit("正在获取定位…")
+        watchdogJob?.cancel()
+        watchdogJob = scope.launch {
+            delay(30_000)
+            if (_waiting.value && recorder == null) {
+                emit("还没拿到定位：请检查定位权限、是否在室内")
+            }
+        }
+    }
+
+    fun pausePressed() {
+        val r = recorder ?: return
+        try {
+            r.pause(source?.recent(3) ?: emptyList(), nowMs())
+            stopSource() // SPEC §7：PAUSED 停定位（省电 + 防屋内漂移）
+            vibrate()
+            flushNow()
+            _session.value = r.snapshot()
+        } catch (e: IllegalStateException) {
+            emit(e.message ?: "操作失败")
+        }
+    }
+
+    fun resumePressed() {
+        val r = recorder ?: return
+        r.resume(nowMs())
+        startSourceIfNeeded()
+        vibrate()
+        flushNow()
+        _session.value = r.snapshot()
+    }
+
+    fun undoPressed() {
+        val r = recorder ?: return
+        if (r.undo()) {
+            flushNow()
+            _session.value = r.snapshot()
+        } else {
+            emit("没有可撤销的操作")
+        }
+    }
+
+    /** 返回 TooFar 时由 UI 弹确认，确认后带 force=true 再调 */
+    fun finishPressed(force: Boolean = false): FinishResult? {
+        val r = recorder ?: return null
+        val res = r.finish(source?.recent(3) ?: emptyList(), nowMs(), force)
+        if (res is FinishResult.Ok) {
+            _finishTooFar.value = null
+            stopSource()
+            val saved = r.snapshot()
+            runCatching { store.saveSession(saved) }
+            runCatching { store.clearActive() }
+            recorder = null
+            _waiting.value = false
+            watchdogJob?.cancel()
+            vibrate()
+            _session.value = saved
+            emit("已保存本次拜年 🎉")
+        } else if (res is FinishResult.TooFar) {
+            _finishTooFar.value = res.distM // UI 弹"距 Home X 米，仍要结束？"
+        }
+        return res
+    }
+
+    fun dismissFinishTooFar() {
+        _finishTooFar.value = null
+    }
+
+    fun setMode(mode: Mode) {
+        val r = recorder ?: return
+        r.setMode(mode, nowMs())
+        flushNow()
+        _session.value = r.snapshot()
+        emit(if (mode == Mode.BIKE) "下一段将骑行前往，到户自动回走路" else "已切回步行")
+    }
+
+    // ---------- 定位回调（源线程） ----------
+
+    @Synchronized
+    fun applyFix(f: Fix) {
+        _gpsAcc.value = f.acc
+        val r = recorder
+        if (r == null && _waiting.value) {
+            val fresh = RecorderState.fresh()
+            try {
+                fresh.start(listOf(f), nowMs(), f)
+            } catch (e: Exception) {
+                emit(e.message ?: "定位启动失败")
+                return
+            }
+            recorder = fresh
+            _waiting.value = false
+            watchdogJob?.cancel()
+            vibrate()
+            flushNow()
+            _session.value = fresh.snapshot()
+            emit("开始记录！到一户按「暂停」")
+            return
+        }
+        if (r != null) {
+            try {
+                r.addPoint(f.pos, f.acc, nowMs())
+                _session.value = r.snapshot()
+            } catch (_: IllegalStateException) {
+                /* 非 WALKING 状态，忽略 */
+            }
+        }
+    }
+
+    fun handleGpsError(kind: GpsErrorKind) {
+        emit(
+            when (kind) {
+                GpsErrorKind.UNSUPPORTED -> "此设备不支持定位"
+                GpsErrorKind.DENIED -> "定位权限被拒绝：请在系统设置中允许定位后重试"
+                GpsErrorKind.UNAVAILABLE -> "无法获取定位：请确认系统定位服务已开启、人在开阔处"
+                GpsErrorKind.TIMEOUT -> "定位超时：请到室外开阔处重试"
+            },
+        )
+    }
+
+    fun flushNow() {
+        val r = recorder ?: return
+        runCatching { store.saveActive(r.checkpoint()) }
+    }
+
+    fun elapsedMs(): Long {
+        val s = _session.value ?: return 0
+        val t0 = s.points.firstOrNull()?.t ?: s.createdAt
+        return (nowMs() - t0).coerceAtLeast(0)
+    }
+
+    // ---------- 内部 ----------
+
+    private fun startSourceIfNeeded() {
+        val src = source ?: return
+        if (src.active) return
+        src.start(
+            object : LocationCallbacks {
+                override fun onFix(f: Fix) = applyFix(f)
+                override fun onError(kind: GpsErrorKind, message: String) = handleGpsError(kind)
+            },
+        )
+    }
+
+    private fun stopSource() {
+        source?.stop()
+    }
+
+    private fun vibrate() {
+        val c = context ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 31) {
+                val vm = c.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator.vibrate(
+                    VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                val v = c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                v.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        }
+    }
+
+    private fun emit(msg: String) {
+        scope.launch { _messages.emit(msg) }
+    }
+
+    private fun nowMs(): Long = System.currentTimeMillis()
+
+    // ---------- 测试辅助 ----------
+
+    /** 仅测试用：清空运行时状态（可选保留存储，用于"崩溃恢复"场景模拟） */
+    fun resetForTest(clearStore: Boolean) {
+        recorder = null
+        _waiting.value = false
+        _pendingRestore.value = false
+        _session.value = null
+        _gpsAcc.value = null
+        watchdogJob?.cancel()
+        if (clearStore) {
+            runCatching { store.clearActive() }
+        }
+    }
+}
