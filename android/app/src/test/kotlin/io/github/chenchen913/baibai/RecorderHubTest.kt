@@ -66,9 +66,10 @@ class RecorderHubTest {
     @Test
     fun `全链路：开始→暂停→继续→结束保存`() {
         RecorderHub.startPressed()
-        fake.push(HOME) // 首个定位 → 创建会话
+        fake.push(HOME) // 首个定位 → 创建会话（仅确定 Home，不产生轨迹点——与网页版语义一致）
         assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
-        assertEquals(1, RecorderHub.session.value?.points?.size)
+        assertEquals(HOME, RecorderHub.recorder?.snapshot()?.home)
+        assertEquals(0, RecorderHub.session.value?.points?.size)
 
         fake.push(far(50.0))
         fake.push(far(90.0))
