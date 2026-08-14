@@ -97,6 +97,7 @@ class SystemLocationSource(private val context: Context) : LocationSource {
         running = false
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         lm.removeUpdates(listener)
+        buffer.clear() // 与网页版 P19 一致：停定位时清空缓冲，避免恢复后 immediate pause 混入旧点
     }
 }
 

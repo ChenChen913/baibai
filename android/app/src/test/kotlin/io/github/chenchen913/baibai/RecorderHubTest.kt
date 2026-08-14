@@ -75,16 +75,17 @@ class RecorderHubTest {
         assertEquals(HOME, RecorderHub.recorder?.snapshot()?.home)
         assertEquals(0, RecorderHub.session.value?.points?.size)
 
+        // 走路到 A 户，门口站定连续采样（真实场景：近 10 个 fix 都在门口）
         fake.push(far(50.0))
         fake.push(far(90.0))
-        fake.push(far(105.0))
-        RecorderHub.pausePressed() // 最近 3 个 fix 中位数 → 新户
+        repeat(6) { fake.push(far(105.0)) }
+        RecorderHub.pausePressed() // 最近 10 个 fix 中位数 → far105 新户
         assertEquals(SessionState.PAUSED, RecorderHub.recorder?.currentState)
         assertEquals(1, RecorderHub.recorder?.snapshot()?.nodes?.size)
 
         RecorderHub.resumePressed()
         fake.push(HOME)
-        val res = RecorderHub.finishPressed() // 中位数 far(90) 距 Home 90m → TooFar
+        val res = RecorderHub.finishPressed() // 中位数仍在 far105（105m > 20m）→ TooFar
         assertTrue(res is FinishResult.TooFar)
         RecorderHub.finishPressed(force = true)
         assertEquals(1, RecorderHub.store.listSessions().size)
@@ -94,10 +95,11 @@ class RecorderHubTest {
     @Test
     fun `检查点恢复：崩溃后续录`() {
         RecorderHub.startPressed()
+        // 前 3 个 fix 定 Home（中位数 far50）；随后走到 A 户门口站定
         fake.push(HOME)
         fake.push(far(50.0))
         fake.push(far(90.0))
-        fake.push(far(105.0))
+        repeat(6) { fake.push(far(105.0)) }
         RecorderHub.pausePressed()
         RecorderHub.flushNow()
         val nodeCount = RecorderHub.recorder?.snapshot()?.nodes?.size ?: 0
