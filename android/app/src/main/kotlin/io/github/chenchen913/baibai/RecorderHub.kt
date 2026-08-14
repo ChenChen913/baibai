@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /**
  * 全局记录中枢（对应网页版 main.ts 的职责）。
@@ -56,6 +57,10 @@ object RecorderHub {
     private val _feedbackOn = MutableStateFlow(true)
     val feedbackOn: StateFlow<Boolean> = _feedbackOn
 
+    // 用户选定的拜年日期（默认今天；记录页徽章可改）
+    private val _bizDate = MutableStateFlow(LocalDate.now())
+    val bizDate: StateFlow<LocalDate> = _bizDate
+
     lateinit var store: JsonStore
         private set
     var source: LocationSource? = null // 测试可注入 FakeSource
@@ -73,9 +78,12 @@ object RecorderHub {
         context = app.applicationContext
         store = JsonStore(app.filesDir)
         source = SystemLocationSource(app.applicationContext)
-        _feedbackOn.value = app.applicationContext
+        val prefs = app.applicationContext
             .getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
-            .getBoolean("feedback_on", true)
+        _feedbackOn.value = prefs.getBoolean("feedback_on", true)
+        _bizDate.value = prefs.getString("biz_date", null)
+            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: LocalDate.now()
         // D22：每 10s 检查点落盘
         if (!flushTimerStarted) {
             flushTimerStarted = true
@@ -87,6 +95,16 @@ object RecorderHub {
             }
         }
     }
+
+    /** 用户选择拜年日期（记录页徽章弹出日期选择器后回调） */
+    fun setBizDate(d: LocalDate) {
+        _bizDate.value = d
+        context?.getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
+            ?.edit()?.putString("biz_date", d.toString())?.apply()
+    }
+
+    /** 全局轻提示入口（AppRoot 顶部胶囊） */
+    fun toast(msg: String) = emit(msg)
 
     /** P6：切换震动/提示音开关 */
     fun setFeedback(on: Boolean) {
@@ -268,7 +286,7 @@ object RecorderHub {
         _gpsAcc.value = f.acc
         val r = recorder
         if (r == null && _waiting.value) {
-            val fresh = RecorderState.fresh()
+            val fresh = RecorderState.fresh(_bizDate.value)
             try {
                 fresh.start(listOf(f), nowMs(), f)
             } catch (e: Exception) {

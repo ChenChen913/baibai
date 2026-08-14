@@ -24,9 +24,26 @@ import {
   saveSession,
 } from './db.js';
 import type { Fix } from './geo.js';
+import { cnyLabel, fromDateStr, toDateStr } from './cny.js';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 const gps = new GpsTracker();
+
+// 拜年日期（默认今天；用户可改——初一/初二/初三……哪一天拜年都行）
+const BIZ_DATE_KEY = 'baibai_biz_date';
+function loadBizDate(): Date {
+  try {
+    const s = localStorage.getItem(BIZ_DATE_KEY);
+    if (s) {
+      const d = fromDateStr(s);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  } catch {
+    /* 存储不可用则忽略 */
+  }
+  return new Date();
+}
+let bizDate = loadBizDate();
 
 /** P11：所有插入 innerHTML 的用户/外部数据一律转义 */
 const escHtml = (s: string): string =>
@@ -216,6 +233,9 @@ function mountRecord(): Ui {
     onFeedbackToggle() {
       toggleFeedback();
     },
+    onDatePick() {
+      pickBizDate();
+    },
   });
   mapCtrl = mountMap(
     app.querySelector<HTMLElement>('#map')!,
@@ -223,7 +243,50 @@ function mountRecord(): Ui {
   );
   syncMap();
   ui.setFeedbackOn(feedbackOn());
+  ui.setDateLabel(cnyLabel(bizDate));
   return ui;
+}
+
+/** 拜年日期选择对话框（原生 date 输入 → 手机自带日期选择器） */
+function pickBizDate(): void {
+  const overlay = document.createElement('div');
+  overlay.className = 'dlg-overlay';
+  const el = document.createElement('div');
+  el.className = 'dlg';
+  const h = document.createElement('h3');
+  h.textContent = '选择拜年日期';
+  const p = document.createElement('p');
+  p.textContent = '初一、初二、初三……选哪天拜年都行，本次记录与回放都会用这个日期。';
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.value = toDateStr(bizDate);
+  input.className = 'date-input';
+  const actions = document.createElement('div');
+  actions.className = 'dlg-actions';
+  const ok = document.createElement('button');
+  ok.className = 'primary small';
+  ok.textContent = '确定';
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost small';
+  cancel.textContent = '取消';
+  actions.append(ok, cancel);
+  el.append(h, p, input, actions);
+  overlay.appendChild(el);
+  const done = (): void => overlay.remove();
+  ok.addEventListener('click', () => {
+    if (!input.value) return;
+    bizDate = fromDateStr(input.value);
+    try {
+      localStorage.setItem(BIZ_DATE_KEY, toDateStr(bizDate));
+    } catch {
+      /* 存储不可用则忽略 */
+    }
+    ui.setDateLabel(cnyLabel(bizDate));
+    ui.toast('拜年日期已设为 ' + cnyLabel(bizDate));
+    done();
+  });
+  cancel.addEventListener('click', done);
+  app.appendChild(overlay);
 }
 
 function toggleFeedback(): void {
@@ -242,7 +305,10 @@ ui = mountRecord();
 
 function onFix(f: Fix): void {
   if (pendingStart && !recorder) {
-    recorder = new RecorderState();
+    recorder = new RecorderState({
+      date: toDateStr(bizDate),
+      year: bizDate.getFullYear(),
+    });
     try {
       recorder.start([f], now(), f);
     } catch (e) {

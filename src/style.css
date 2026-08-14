@@ -288,15 +288,18 @@ button:disabled {
 #toast {
   position: fixed;
   left: 50%;
-  bottom: 44px;
-  transform: translateX(-50%);
-  background: rgba(90, 58, 42, 0.94);
-  color: #fff;
+  top: calc(14px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%) translateY(-10px);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink);
+  border: 1px solid rgba(232, 162, 61, 0.45);
+  box-shadow: 0 8px 24px rgba(90, 58, 42, 0.16);
   padding: 11px 22px;
   border-radius: 999px;
   font-size: 15px;
+  font-weight: 600;
   opacity: 0;
-  transition: opacity 0.3s;
+  transition: opacity 0.25s ease, transform 0.25s ease;
   pointer-events: none;
   max-width: 88vw;
   z-index: 1200;
@@ -304,6 +307,7 @@ button:disabled {
 
 #toast.show {
   opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 /* ---------- 记录页（驾驶舱） ---------- */
@@ -340,6 +344,25 @@ button:disabled {
   border: 1px solid rgba(232, 162, 61, 0.5);
   color: var(--accent);
   background: rgba(255, 255, 255, 0.5);
+}
+
+.date-chip {
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.date-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 16px;
+  font-family: inherit;
+  margin: 4px 0 16px;
+  box-sizing: border-box;
 }
 
 .stat-card {
@@ -622,6 +645,10 @@ button.small {
   fill: var(--accent2);
 }
 
+.node.home text {
+  fill: #fff;
+}
+
 .node text {
   font-size: 15px;
   fill: var(--ink);
@@ -642,6 +669,11 @@ button.small {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
   font-size: 13px;
+}
+
+.pctrl button.on {
+  background: linear-gradient(135deg, var(--accent), #d86a3c);
+  color: #fff;
 }
 
 .section {

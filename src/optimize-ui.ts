@@ -136,10 +136,12 @@ export function mountOptimizeView(
         const isHome = id === 'home';
         const label = isHome ? '家' : String(k);
         const reached = k <= revealK;
+        // 家字画在金色圆内（白字），不再悬浮于圆上方——任何布局下都不会与其它元素重叠
+        const textY = isHome ? p.y + 5.5 : p.y - 14;
         return (
           `<g class="node${isHome ? ' home' : ''}${reached ? ' lit' : ''}">` +
           `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isHome ? 10 : 9}"/>` +
-          `<text x="${p.x.toFixed(1)}" y="${(p.y - (isHome ? 16 : 14)).toFixed(1)}">${label}</text>` +
+          `<text x="${p.x.toFixed(1)}" y="${textY.toFixed(1)}">${label}</text>` +
           `</g>`
         );
       })

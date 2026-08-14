@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,14 +27,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.chenchen913.baibai.WhitelistDeepLink.Brand
 
 private val BrandCardBg = Color(0x66FFFFFF) // 白 40%
 private val BrandCardBorder = Color(0x33FFFFFF) // 白 20%
 
 /** 省电白名单引导（四层防杀之第三层：国产 ROM 决定性动作；首次开始拜年前展示一次）
- * 视觉参照 uxpilot-export/4-baibai - Guide.html */
+ * 视觉参照 uxpilot-export/4-baibai - Guide.html
+ *
+ * 点任意厂商卡片 → 直达该品牌系统设置页（WhitelistDeepLink，多级兜底）。
+ */
 @Composable
-fun WhitelistGuideScreen(onDone: () -> Unit) {
+fun WhitelistGuideScreen(onDone: () -> Unit, onDeepLink: (Brand) -> Unit) {
     BaibaiPage {
         Column(Modifier.fillMaxSize()) {
             // 上部可滚动区
@@ -61,38 +66,46 @@ fun WhitelistGuideScreen(onDone: () -> Unit) {
                     lineHeight = 20.sp,
                     color = BaibaiInk.copy(alpha = 0.6f),
                 )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "点下方自己手机的卡片，可直接跳转对应设置页；跳不过去就按卡片上的路径手动设置。",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 18.sp,
+                    color = BaibaiAccent,
+                )
 
-                Spacer(Modifier.height(40.dp))
+                Spacer(Modifier.height(24.dp))
 
-                // §7.2：五张厂商卡片
+                // §7.2：五张厂商卡片（整卡可点 → 直达系统设置）
                 BrandCard(
-                    brand = "小米 / 红米",
+                    brand = Brand.XIAOMI,
                     lines = listOf("设置 → 应用设置 → 拜拜 → 省电策略 → 无限制；并开启「自启动」"),
-                    chevron = true,
+                    onDeepLink = onDeepLink,
                 )
                 Spacer(Modifier.height(12.dp))
                 BrandCard(
-                    brand = "华为 / 荣耀",
+                    brand = Brand.HUAWEI,
                     lines = listOf("设置 → 应用 → 应用启动管理 → 拜拜 → 手动管理 → 允许自启动/关联启动/后台活动"),
-                    chevron = true,
+                    onDeepLink = onDeepLink,
                 )
                 Spacer(Modifier.height(12.dp))
                 BrandCard(
-                    brand = "OPPO / 一加",
+                    brand = Brand.OPPO,
                     lines = listOf("设置 → 电池 → 更多设置 → 拜拜 → 允许后台运行；应用管理里开自启动"),
-                    chevron = true,
+                    onDeepLink = onDeepLink,
                 )
                 Spacer(Modifier.height(12.dp))
                 BrandCard(
-                    brand = "vivo / iQOO",
+                    brand = Brand.VIVO,
                     lines = listOf("i管家 → 电池 → 后台耗电管理 → 拜拜 → 允许后台高耗电"),
-                    chevron = true,
+                    onDeepLink = onDeepLink,
                 )
                 Spacer(Modifier.height(12.dp))
                 BrandCard(
-                    brand = "三星",
+                    brand = Brand.SAMSUNG,
                     lines = listOf("设置 → 电池 → 后台使用限制 → 拜拜 → 不休眠"),
-                    chevron = false,
+                    onDeepLink = onDeepLink,
                 )
                 Spacer(Modifier.height(24.dp))
             }
@@ -124,17 +137,30 @@ fun WhitelistGuideScreen(onDone: () -> Unit) {
 }
 
 @Composable
-private fun BrandCard(brand: String, lines: List<String>, chevron: Boolean) {
+private fun BrandCard(brand: Brand, lines: List<String>, onDeepLink: (Brand) -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .background(BrandCardBg, RoundedCornerShape(RoundedBrand))
             .border(1.dp, BrandCardBorder, RoundedCornerShape(RoundedBrand))
+            .clickable { onDeepLink(brand) }
             .padding(16.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(brand, fontSize = 14.sp, fontWeight = FontWeight.Black, color = BaibaiAccent)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(brand.label, fontSize = 14.sp, fontWeight = FontWeight.Black, color = BaibaiAccent)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "去设置",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    color = BaibaiAccent.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .background(BaibaiAccent.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                )
+            }
             lines.forEachIndexed { i, line ->
                 Text(
                     line,
@@ -146,13 +172,11 @@ private fun BrandCard(brand: String, lines: List<String>, chevron: Boolean) {
                 )
             }
         }
-        if (chevron) {
-            Icon(
-                Icons.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = BaibaiInk.copy(alpha = 0.1f),
-                modifier = Modifier.size(16.dp),
-            )
-        }
+        Icon(
+            Icons.Filled.KeyboardArrowRight,
+            contentDescription = "跳转" + brand.label + "系统设置",
+            tint = BaibaiInk.copy(alpha = 0.35f),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }

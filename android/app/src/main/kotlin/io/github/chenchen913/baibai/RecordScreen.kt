@@ -1,5 +1,8 @@
 package io.github.chenchen913.baibai
 
+import android.annotation.SuppressLint
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,10 +36,13 @@ import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -56,9 +62,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import io.github.chenchen913.baibai.core.cny.Cny
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.SessionState
+import io.github.chenchen913.baibai.core.model.TrackPoint
 import kotlinx.coroutines.delay
+import org.json.JSONArray
+import org.json.JSONObject
 
 private fun fmtClock(ms: Long): String {
     val s = ms / 1000
@@ -74,7 +85,6 @@ private val STATE_LABEL = mapOf(
 
 private val GlassCardBg = Color(0xCCFFFFFF) // 白 80%
 private val GlassCardBorder = Color(0x66FFFFFF) // 白 40%
-private val MapPlaceholderBg = Color(0xFFF4F1EA)
 
 /** 记录页（原始需求 §7.1）：
  * 品牌栏 → 状态大卡 → 实时地图卡（可折叠，展开约屏高 30~35%）→ 主按钮区 → 工具条。
@@ -85,10 +95,12 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
     val waiting by RecorderHub.waiting.collectAsState()
     val gpsAcc by RecorderHub.gpsAcc.collectAsState()
     val feedbackOn by RecorderHub.feedbackOn.collectAsState()
+    val bizDate by RecorderHub.bizDate.collectAsState()
 
     val st = session?.state ?: SessionState.IDLE
     val mode = session?.currentMode ?: Mode.WALK
     val recording = st == SessionState.WALKING || st == SessionState.PAUSED
+    var showDatePicker by remember { mutableStateOf(false) }
 
     BaibaiPage {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -107,7 +119,9 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
                     Spacer(Modifier.height(20.dp))
                     BrandBar(
                         feedbackOn = feedbackOn,
+                        bizDate = bizDate,
                         onToggleFeedback = { RecorderHub.setFeedback(!feedbackOn) },
+                        onPickDate = { showDatePicker = true },
                     )
                     Spacer(Modifier.height(20.dp))
                     StatusCard(
@@ -188,12 +202,49 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
             }
         }
     }
+
+    // 拜年日期选择（默认今天；初一~初十自动显示「大年初X」徽章）
+    if (showDatePicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = bizDate
+                .atStartOfDay(java.time.ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { ms ->
+                            val picked = java.time.Instant.ofEpochMilli(ms)
+                                .atZone(java.time.ZoneOffset.UTC)
+                                .toLocalDate()
+                            RecorderHub.setBizDate(picked)
+                            RecorderHub.toast("拜年日期已设为 " + Cny.label(picked))
+                        }
+                        showDatePicker = false
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
 }
 
 /* ---------- 1. 品牌栏 ---------- */
 
 @Composable
-private fun BrandBar(feedbackOn: Boolean, onToggleFeedback: () -> Unit) {
+private fun BrandBar(
+    feedbackOn: Boolean,
+    bizDate: java.time.LocalDate,
+    onToggleFeedback: () -> Unit,
+    onPickDate: () -> Unit,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
@@ -214,14 +265,23 @@ private fun BrandBar(feedbackOn: Boolean, onToggleFeedback: () -> Unit) {
             )
         }
         Spacer(Modifier.weight(1f))
-        // 金色描边徽章
-        Box(
+        // 金色描边徽章：显示拜年日期（可点 → 日期选择器，初一~初十自动显示「大年初X」）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .background(BaibaiAccent2.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
                 .border(1.dp, BaibaiAccent2.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
-                .padding(horizontal = 14.dp, vertical = 7.dp),
+                .clickable(onClick = onPickDate)
+                .padding(start = 14.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
         ) {
-            Text("大年初一", fontSize = 12.sp, fontWeight = FontWeight.Black, color = BaibaiAccent2)
+            Text(Cny.label(bizDate), fontSize = 12.sp, fontWeight = FontWeight.Black, color = BaibaiAccent2)
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = "选择拜年日期",
+                tint = BaibaiAccent2,
+                modifier = Modifier.size(16.dp),
+            )
         }
         Spacer(Modifier.width(4.dp))
         // P6：提示音/震动开关（≥48dp 热区）
@@ -372,12 +432,49 @@ private fun TimeColumn(digitSp: Float, modifier: Modifier) {
     }
 }
 
-/* ---------- 3. 实时地图卡（折叠 = 40dp 标题条，展开 = 屏高 30%~35%） ---------- */
+/* ---------- 3. 实时地图卡（真实地图：WebView + Leaflet + OpenStreetMap，免 Key 免费） ----------
+ * 折叠 = 40dp 标题条，展开 = 屏高 30%~35%；瓦片加载失败自动换源，最后暖色纸底兜底，轨迹/标记照常绘制。 */
 
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
     var mapOpen by remember { mutableStateOf(true) }
     val shape = RoundedCornerShape(22.dp)
+    val webView = remember { mutableStateOf<WebView?>(null) }
+    var pageReady by remember { mutableStateOf(false) }
+    val session = RecorderHub.session.collectAsState().value
+    val syncKey = (session?.state ?: SessionState.IDLE) to (session?.nodes?.size ?: 0)
+
+    // 全量同步：页面就绪 / 状态或户数变化 / 重新展开 → 推整条轨迹 + 家/户标记
+    LaunchedEffect(pageReady, syncKey, mapOpen) {
+        if (!pageReady || !mapOpen) return@LaunchedEffect
+        val w = webView.value ?: return@LaunchedEffect
+        val snap = RecorderHub.recorder?.snapshot()
+        if (snap != null) {
+            w.evaluateJavascript("BaibaiMap.setTrack(" + trackJson(snap.points) + ")", null)
+            w.evaluateJavascript(
+                "BaibaiMap.setNodes(" + latLngJson(snap.home) + ", " + nodesJson(snap.nodes) + ")",
+                null,
+            )
+        }
+    }
+
+    // 增量跟随：每 1.2s 推最新定位点（JS 按时间戳去重，轨迹实时增长）
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1200)
+            if (pageReady && mapOpen) {
+                val w = webView.value
+                val last = RecorderHub.recorder?.snapshot()?.points?.lastOrNull()
+                if (w != null && last != null) {
+                    w.evaluateJavascript(
+                        "BaibaiMap.follow(" + last.pos.lat + "," + last.pos.lng + "," + last.acc + "," + last.t + ")",
+                        null,
+                    )
+                }
+            }
+        }
+    }
 
     if (mapOpen) {
         Column(
@@ -402,7 +499,7 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                 Text("实时轨迹", fontSize = 14.sp, fontWeight = FontWeight.Black, color = BaibaiInk)
                 Spacer(Modifier.weight(1f))
                 // 线性折叠图标（无圆形白底），热区 ≥48dp
-                IconButton(onClick = { mapOpen = false }) {
+                IconButton(onClick = { pageReady = false; mapOpen = false }) {
                     Icon(
                         Icons.Filled.KeyboardArrowUp,
                         contentDescription = "收起地图",
@@ -410,31 +507,31 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                     )
                 }
             }
-            Box(
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        webView.value = this
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                        settings.builtInZoomControls = false
+                        settings.setSupportZoom(false)
+                        settings.displayZoomControls = false
+                        settings.userAgentString = settings.userAgentString + " baibai/0.1"
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                pageReady = true
+                            }
+                        }
+                        loadUrl("file:///android_asset/baibai_map/map.html")
+                    }
+                },
+                onRelease = { webView.value = null },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(mapOpenHeight)
-                    .background(MapPlaceholderBg),
-                contentAlignment = Alignment.Center,
-            ) {
-                // §6 空态：线性地图小图标 + 居中一句文案（真地图待接高德 Key）
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.Map,
-                        contentDescription = null,
-                        tint = BaibaiInk.copy(alpha = 0.4f),
-                        modifier = Modifier.size(30.dp),
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "真实地图待接入（高德 Key 到位后显示）",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BaibaiInk.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                    )
-                }
-            }
+                    .height(mapOpenHeight),
+            )
             Row(
                 horizontalArrangement = Arrangement.End,
                 modifier = Modifier
@@ -442,7 +539,7 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 Text(
-                    "© OpenStreetMap / 高德地图",
+                    "© OpenStreetMap 贡献者 · 瓦片失败自动降级",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     color = BaibaiInk.copy(alpha = 0.45f),
@@ -464,7 +561,7 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                 .clip(shape)
                 .background(GlassCardBg)
                 .border(1.dp, GlassCardBorder, shape)
-                .clickable { mapOpen = true },
+                .clickable { pageReady = false; mapOpen = true },
             contentAlignment = Alignment.Center,
         ) {
             Row(
@@ -485,6 +582,35 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
         }
     }
 }
+
+/** 定位点列表 → JS 参数 JSON（[[lat,lng],...]） */
+private fun trackJson(points: List<TrackPoint>): String {
+    val arr = JSONArray()
+    for (p in points) {
+        val pair = JSONArray()
+        pair.put(p.pos.lat)
+        pair.put(p.pos.lng)
+        arr.put(pair)
+    }
+    return arr.toString()
+}
+
+/** 家/户标记 → JS 参数 JSON（户名经 org.json 转义，防注入） */
+private fun nodesJson(nodes: List<io.github.chenchen913.baibai.core.model.HouseNode>): String {
+    val arr = JSONArray()
+    for (n in nodes) {
+        val o = JSONObject()
+        o.put("n", n.autoNo)
+        o.put("name", n.name)
+        o.put("lat", n.pos.lat)
+        o.put("lng", n.pos.lng)
+        arr.put(o)
+    }
+    return arr.toString()
+}
+
+private fun latLngJson(p: io.github.chenchen913.baibai.core.model.LatLng): String =
+    JSONObject().put("lat", p.lat).put("lng", p.lng).toString()
 
 /* ---------- 4. 主按钮区（同一时刻只显示一个主按钮，§8） ---------- */
 

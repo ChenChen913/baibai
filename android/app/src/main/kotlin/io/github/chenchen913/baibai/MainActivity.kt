@@ -10,26 +10,47 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -52,7 +73,7 @@ class MainActivity : ComponentActivity() {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching {
-                log.appendText("${java.time.Instant.now()} thread=${t.name}\n${e.stackTraceToString()}\n\n")
+                log.appendText(java.time.Instant.now().toString() + " thread=" + t.name + "\n" + e.stackTraceToString() + "\n\n")
             }
             prev?.uncaughtException(t, e)
         }
@@ -80,10 +101,12 @@ private sealed interface Screen {
     data class Optimize(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
 }
 
+/** 顶部轻提示（暖色胶囊，不遮底部导航/主按钮区） */
+private data class ToastMsg(val id: Long, val text: String)
+
 @Composable
 fun AppRoot() {
     val ctx = LocalContext.current
-    val snackbar = remember { SnackbarHostState() }
     val prefs = remember { ctx.getSharedPreferences(PREFS, 0) }
 
     val pendingRestore by RecorderHub.pendingRestore.collectAsState()
@@ -91,15 +114,22 @@ fun AppRoot() {
     val session by RecorderHub.session.collectAsState()
     var screen by remember { mutableStateOf<Screen>(Screen.Record) }
 
-    // toast 消息
+    // 顶部轻提示（替代底部 Snackbar：不遮挡底部导航/手势条）
+    var toast by remember { mutableStateOf<ToastMsg?>(null) }
+    var toastSeq by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
-        RecorderHub.messages.collect { snackbar.showSnackbar(it) }
+        RecorderHub.messages.collect { toast = ToastMsg(++toastSeq, it) }
+    }
+    LaunchedEffect(toast) {
+        val t = toast ?: return@LaunchedEffect
+        delay(2400)
+        if (toast?.id == t.id) toast = null
     }
 
     // 上次崩溃提示（M-4）：读一次即清空日志
     val crashMsg = remember { readCrashLogAndClear(ctx) }
     LaunchedEffect(Unit) {
-        crashMsg?.let { snackbar.showSnackbar(it) }
+        crashMsg?.let { toast = ToastMsg(++toastSeq, it) }
     }
 
     // 结束拜年后自动进入回顾页（沿用网页版行为）
@@ -164,6 +194,10 @@ fun AppRoot() {
             )
 
             is Screen.Whitelist -> WhitelistGuideScreen(
+                onDeepLink = { brand ->
+                    val opened = WhitelistDeepLink.open(ctx, brand)
+                    RecorderHub.toast("已为你打开「" + opened + "」，没跳过去就按卡片路径手动设置")
+                },
                 onDone = {
                     prefs.edit().putBoolean(KEY_WHITELIST_SEEN, true).apply()
                     screen = Screen.Record
@@ -204,13 +238,38 @@ fun AppRoot() {
             }
         }
 
-        // 轻提示：底部居中、位于导航栏/手势条之上
-        SnackbarHost(
-            hostState = snackbar,
+        // 顶部暖色轻提示：白底金边胶囊 + 朱红圆点，位于状态栏下方
+        AnimatedVisibility(
+            visible = toast != null,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 }),
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding(),
-        )
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(top = 10.dp, start = 20.dp, end = 20.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .shadow(8.dp, RoundedCornerShape(999.dp))
+                    .background(Color(0xFFFFF8EE), RoundedCornerShape(999.dp))
+                    .border(1.dp, Color(0x59E8A23D), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 16.dp, vertical = 11.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .background(BaibaiAccent, CircleShape),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    toast?.text ?: "",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BaibaiInk,
+                )
+            }
+        }
     }
 
     // 崩溃恢复：检测到未完成检查点
@@ -234,7 +293,7 @@ fun AppRoot() {
             onDismissRequest = { RecorderHub.dismissFinishTooFar() },
             title = {
                 // M-10：无定位时不显示 Infinity
-                Text(if (dist.isFinite()) "距 Home 约 ${dist.roundToInt()} 米" else "当前位置无法定位")
+                Text(if (dist.isFinite()) "距 Home 约 " + dist.roundToInt() + " 米" else "当前位置无法定位")
             },
             text = { Text("当前位置离出发点较远，仍要结束本次拜年吗？") },
             confirmButton = {

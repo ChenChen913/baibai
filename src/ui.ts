@@ -14,6 +14,7 @@ export interface UiCallbacks {
   onHistory(): void;
   onPlan(): void;
   onFeedbackToggle(): void;
+  onDatePick(): void;
 }
 
 export interface Ui {
@@ -25,6 +26,7 @@ export interface Ui {
   toast(msg: string): void;
   confirm(msg: string): boolean;
   setFeedbackOn(on: boolean): void;
+  setDateLabel(label: string): void;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -47,7 +49,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     <div class="wrap record">
       <header class="top">
         <div class="brand"><span class="brand-mark">🧧</span>拜拜<span class="brand-sub">拜年轨迹复盘</span></div>
-        <div class="year-chip">大年初一</div>
+        <button id="btn-date" class="year-chip date-chip" aria-label="选择拜年日期">大年初一</button>
         <button id="btn-feedback" class="sound-toggle" aria-label="关闭提示音与震动">${ICONS.bell}</button>
       </header>
       <div class="stat-card">
@@ -65,7 +67,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
           <button id="map-toggle" class="map-toggle" aria-label="收起地图">${ICONS.chevron}</button>
         </div>
         <div id="map"></div>
-        <div class="map-cap">实时地图 · © OpenStreetMap · 断网自动降级示意模式</div>
+        <div class="map-cap">实时地图 · © OpenStreetMap 贡献者 · 瓦片失败自动换源</div>
       </div>
       <div class="bottom-dock">
         <div class="primary-zone">
@@ -101,6 +103,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   $('btn-plan').addEventListener('click', () => cb.onPlan());
   $('btn-history').addEventListener('click', () => cb.onHistory());
   $('btn-feedback').addEventListener('click', () => cb.onFeedbackToggle());
+  $('btn-date').addEventListener('click', () => cb.onDatePick());
 
   function setFeedbackOn(on: boolean): void {
     const btn = $('btn-feedback');
@@ -170,5 +173,9 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     $('btn-bike').classList.toggle('active', s?.currentMode === 'bike');
   }
 
-  return { render, toast, confirm: (m: string) => window.confirm(m), setFeedbackOn };
+  function setDateLabel(label: string): void {
+    $('btn-date').textContent = label;
+  }
+
+  return { render, toast, confirm: (m: string) => window.confirm(m), setFeedbackOn, setDateLabel };
 }

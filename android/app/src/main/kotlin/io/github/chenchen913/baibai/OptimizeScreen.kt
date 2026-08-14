@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.chenchen913.baibai.core.model.SessionData
@@ -156,7 +157,15 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 BackButton(onClick = onBack)
                 Spacer(Modifier.width(12.dp))
-                Text("${session.date} · 三线对比", fontSize = 18.sp, fontWeight = FontWeight.Black, color = BaibaiInk)
+                Text(
+                    session.date + " · 三线对比",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = BaibaiInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -243,7 +252,7 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
                         }
                         val homePaint = TextPaint().apply {
                             color = 0xFFFFFFFF.toInt()
-                            textSize = 8f * density / scale
+                            textSize = 10f * density / scale
                             textAlign = Paint.Align.CENTER
                             isFakeBoldText = true
                         }

@@ -22,16 +22,37 @@ export function mountMap(
   initial: { lat: number; lng: number } | null,
 ): MapController {
   const map = L.map(el, {
-    zoomControl: true,
-    attributionControl: true,
+    zoomControl: false, // 设计稿规范：手机用双指缩放，不显示会遮挡画面的 +/- 控件
+    attributionControl: false, // 版权注由地图卡底部一行展示
     center: initial ? [initial.lat, initial.lng] : [36.71, 119.1], // 默认潍坊附近
     zoom: initial ? 17 : 13,
   });
-  map.attributionControl.setPrefix(false);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap',
-  }).addTo(map);
+
+  // 免 Key 免费瓦片：OSM 主源 → OSM-HOT 备源，失败自动切换；断网时轨迹/标记照常绘制
+  const sources = [
+    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+  ];
+  let srcIdx = 0;
+  let errCount = 0;
+  const addTile = (): void => {
+    if (srcIdx >= sources.length) return;
+    const layer = L.tileLayer(sources[srcIdx], {
+      maxZoom: 19,
+      ...(srcIdx === 1 ? { subdomains: 'abc' } : {}),
+    });
+    layer.on('tileerror', () => {
+      errCount += 1;
+      if (errCount > 6 && srcIdx < sources.length - 1) {
+        errCount = 0;
+        srcIdx += 1;
+        layer.remove();
+        addTile();
+      }
+    });
+    layer.addTo(map);
+  };
+  addTile();
 
   const track = L.polyline([], {
     color: '#c8402f',

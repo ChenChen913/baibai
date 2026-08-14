@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<link rel="stylesheet" href="leaflet.css"/>
+<style>
+  html, body, #map { margin:0; padding:0; width:100%; height:100%; background:#F4F1EA; }
+  .home-pin, .node-pin {
+    display:flex; align-items:center; justify-content:center;
+    border-radius:50%; font-weight:800; color:#fff; font-family:sans-serif;
+    box-shadow:0 3px 8px rgba(90,58,42,.3);
+  }
+  .home-pin { width:30px; height:30px; background:linear-gradient(135deg,#E8A23D,#D49130); font-size:14px; }
+  .node-pin { width:26px; height:26px; background:linear-gradient(135deg,#C8402F,#A62D22); font-size:12px; }
+  .baibai-node-icon, .baibai-home-icon { background:transparent; border:none; }
+  .attribution {
+    position:absolute; right:0; bottom:0; z-index:1000; font-size:10px;
+    color:rgba(90,58,42,.5); background:rgba(255,255,255,.6);
+    padding:1px 6px; border-radius:8px 0 0 0; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="attribution">© OpenStreetMap</div>
+<script src="leaflet.js"></script>
+<script>
+(function () {
+  var map = L.map('map', { zoomControl: false, attributionControl: false, center: [36.71, 119.1], zoom: 13 });
+
+  // 瓦片源（免 Key、免费）：OSM 主源 → OSM-HOT 备源，失败自动切换；全部失败时纸色底兜底，轨迹照常绘制
+  var sources = [
+    { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub: null },
+    { url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', sub: 'abc' }
+  ];
+  var srcIndex = 0;
+  var errCount = 0;
+
+  function addTile() {
+    if (srcIndex >= sources.length) return;
+    var s = sources[srcIndex];
+    var opts = { maxZoom: 19 };
+    if (s.sub) opts.subdomains = s.sub;
+    var layer = L.tileLayer(s.url, opts);
+    layer.on('tileerror', function () {
+      errCount += 1;
+      if (errCount > 6 && srcIndex < sources.length - 1) {
+        errCount = 0;
+        srcIndex += 1;
+        map.removeLayer(layer);
+        addTile();
+      }
+    });
+    layer.addTo(map);
+  }
+  addTile();
+
+  var track = L.polyline([], { color: '#C8402F', weight: 4, opacity: 0.85, lineJoin: 'round' }).addTo(map);
+  var trackPts = [];
+  var lastT = 0;
+  var me = null;
+  var accCircle = null;
+  var nodeLayer = L.layerGroup().addTo(map);
+
+  window.BaibaiMap = {
+    // 追加最新定位点（按时间戳去重），视野跟随当前位置
+    follow: function (lat, lng, acc, t) {
+      if (!isFinite(lat) || !isFinite(lng)) return;
+      if (t && t === lastT) return;
+      lastT = t || 0;
+      trackPts.push([lat, lng]);
+      track.setLatLngs(trackPts);
+      if (!me) {
+        me = L.circleMarker([lat, lng], {
+          radius: 9, color: '#ffffff', weight: 2.5, fillColor: '#C8402F', fillOpacity: 1
+        }).addTo(map);
+      } else {
+        me.setLatLng([lat, lng]);
+      }
+      if (accCircle) { map.removeLayer(accCircle); accCircle = null; }
+      if (acc && acc > 0) {
+        accCircle = L.circle([lat, lng], {
+          radius: acc, color: '#C8402F', weight: 1, fillColor: '#C8402F', fillOpacity: 0.07, interactive: false
+        }).addTo(map);
+      }
+      map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: true });
+    },
+
+    // 整条轨迹（恢复/继续/重新展开时全量同步）
+    setTrack: function (pts) {
+      lastT = 0;
+      trackPts = [];
+      for (var i = 0; i < pts.length; i++) {
+        var p = pts[i];
+        if (p && isFinite(p[0]) && isFinite(p[1])) trackPts.push([p[0], p[1]]);
+      }
+      track.setLatLngs(trackPts);
+      if (trackPts.length > 0) {
+        map.fitBounds(L.latLngBounds(trackPts).pad(0.25));
+      }
+    },
+
+    // 家（金）+ 户（红圈数字，悬浮户名）
+    setNodes: function (home, nodes) {
+      nodeLayer.clearLayers();
+      if (home && isFinite(home.lat) && isFinite(home.lng) && (home.lat !== 0 || home.lng !== 0)) {
+        L.marker([home.lat, home.lng], {
+          icon: L.divIcon({
+            className: 'baibai-home-icon',
+            html: '<div class="home-pin">家</div>',
+            iconSize: [30, 30], iconAnchor: [15, 15]
+          }),
+          zIndexOffset: 200
+        }).addTo(nodeLayer);
+      }
+      for (var i = 0; i < (nodes ? nodes.length : 0); i++) {
+        var n = nodes[i];
+        var m = L.marker([n.lat, n.lng], {
+          icon: L.divIcon({
+            className: 'baibai-node-icon',
+            html: '<div class="node-pin">' + n.n + '</div>',
+            iconSize: [26, 26], iconAnchor: [13, 13]
+          }),
+          zIndexOffset: 150
+        });
+        if (n.name) {
+          var label = document.createElement('div');
+          label.textContent = n.name;
+          m.bindTooltip(label, { direction: 'top', offset: [0, -14] });
+        }
+        m.addTo(nodeLayer);
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

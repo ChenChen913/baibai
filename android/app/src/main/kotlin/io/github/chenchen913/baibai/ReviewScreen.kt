@@ -100,8 +100,10 @@ fun ReviewScreen(
     val density = LocalDensity.current.density
 
     var playing by remember { mutableStateOf(false) }
-    var speed by remember { mutableStateOf(2f) }
+    // 播放速度：-1 = 总览（全程 ≤20 秒自动倍速，默认），其余为固定倍速
+    var speed by remember { mutableStateOf(-1f) }
     var progressMs by remember { mutableStateOf(0L) }
+    val effectiveSpeed = if (speed <= 0f) maxOf(8f, plan.totalMs / 20_000f) else speed
 
     LaunchedEffect(playing, speed) {
         if (playing && plan.totalMs > 0) {
@@ -109,7 +111,7 @@ fun ReviewScreen(
             val t0 = System.currentTimeMillis()
             while (true) {
                 val now = System.currentTimeMillis()
-                val next = min(plan.totalMs, base + ((now - t0) * speed).toLong())
+                val next = min(plan.totalMs, base + ((now - t0) * effectiveSpeed).toLong())
                 progressMs = next
                 if (next >= plan.totalMs) break
                 delay(16)
@@ -200,10 +202,16 @@ fun ReviewScreen(
                             textAlign = Paint.Align.CENTER
                             isFakeBoldText = true
                         }
+                        val homePaint = TextPaint().apply {
+                            color = 0xFFFFFFFF.toInt()
+                            textSize = 13f * density / scale
+                            textAlign = Paint.Align.CENTER
+                            isFakeBoldText = true
+                        }
                         fun project(p: LatLng) = Track.projectToView(listOf(p), W.toDouble(), H.toDouble())[0]
                         val homeProj = project(s.home)
                         drawCircle(BaibaiAccent2, radius = 10f, center = Offset(homeProj.x.toFloat(), homeProj.y.toFloat()))
-                        drawContext.canvas.nativeCanvas.drawText("家", homeProj.x.toFloat(), (homeProj.y - 16).toFloat(), labelPaint)
+                        drawContext.canvas.nativeCanvas.drawText("家", homeProj.x.toFloat(), homeProj.y.toFloat() + homePaint.textSize * 0.35f, homePaint)
                         s.nodes.forEach { n ->
                             val pr = project(n.pos)
                             drawCircle(Color.White, radius = 9f, center = Offset(pr.x.toFloat(), pr.y.toFloat()))
@@ -251,10 +259,11 @@ fun ReviewScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(1f, 2f, 4f).forEach { v ->
+                        listOf(-1f, 1f, 2f, 4f, 8f).forEach { v ->
                             val active = speed == v
+                            val label = if (v <= 0f) "总览" else v.toInt().toString() + "x"
                             Text(
-                                "${v.toInt()}x",
+                                label,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Black,
                                 color = if (active) BaibaiAccent else BaibaiInk.copy(alpha = 0.2f),
@@ -266,7 +275,8 @@ fun ReviewScreen(
                     }
                     Spacer(Modifier.weight(1f))
                     Text(
-                        "${fmtDur(progressMs)} / ${fmtDur(plan.totalMs)}",
+                        fmtDur(progressMs) + " / " + fmtDur(plan.totalMs) + " · " +
+                            (if (speed <= 0f) "总览≈" + effectiveSpeed.toInt().toString() + "x" else speed.toInt().toString() + "x"),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = BaibaiInk.copy(alpha = 0.6f),

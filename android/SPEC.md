@@ -24,8 +24,8 @@
 |---|---|---|
 | 语言 | **Kotlin** | 官方一等方式 |
 | UI | **Jetpack Compose** | UI 自由度最高、动画生态好（"高级感"需求） |
-| 地图 | **高德地图 Android SDK** | 中国农村路网数据最全；个人开发者免费申请 Key |
-| 定位 | **高德定位 SDK**（⚠️ 修正） | **国行安卓没有 Google Play Services，谷歌 FusedLocation 不可靠**；高德定位是国内事实标准，且与高德地图一体化。定位模式：GPS+北斗+基站+WiFi 融合 |
+| 地图 | **WebView + Leaflet + OpenStreetMap（2026-08-14 修正，免 Key）** | 与网页版同一套地图方案，免费免 Key、开箱即用；瓦片失败自动换源 + 纸底兜底。高德瓦片可作为可选升级（见 高德接入指引.md §4） |
+| 定位 | **系统 LocationManager（SystemLocationSource）** | A-M1 决策：免 Key 跑通全链路；WGS-84 与 OSM 天然一致，无 GCJ-02 转换问题。高德定位 SDK 留作 LocationSource 抽象上的后续可选项 |
 | 持久化 | **JSON 文件（filesDir）+ 原子写** | 与网页版 IndexedDB 的三份数据（会话/检查点/清单）格式一致，见数据格式文档；10s+按键检查点架构原样保留 |
 | 后台 | **前台服务（foregroundServiceType="location"）** | 见防杀文档 |
 | 算法 | TS 纯函数 → Kotlin 纯函数直译 | 对照基准 = 现有 111 项测试 |
@@ -41,7 +41,7 @@ MainActivity (Compose 单 Activity)
    │        │
    │        ▼
    ├── RecorderState.kt（纯 Kotlin 状态机，无 Android 依赖）
-   ├── LocationService.kt（前台服务：高德定位回调 → RecorderState.addPoint）
+   ├── LocationService.kt（前台服务：系统定位回调 → RecorderState.addPoint）
    └── JsonStore.kt（filesDir JSON：检查点/会话/清单，原子写）
 ```
 
@@ -86,7 +86,7 @@ MainActivity (Compose 单 Activity)
   3. 手动杀掉 App → 重开 → "继续未完成记录" → 数据完整（防杀验收）；
   4. 白名单引导流程可用；
   5. 网页版导出 JSON → 安卓导入 → 回放/优化结果一致（互通验收）；
-  6. 高德地图显示真实村庄路网。
+  6. 真实地图（OSM 瓦片）显示村庄路网。
 
 ## 7. 里程碑（对应网页版 M1~M5）
 

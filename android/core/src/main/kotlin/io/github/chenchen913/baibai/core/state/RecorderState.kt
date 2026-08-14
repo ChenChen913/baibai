@@ -52,13 +52,13 @@ class RecorderState private constructor(
         fun newId(prefix: String): String =
             "${prefix}_${System.currentTimeMillis().toString(36)}_${seq.incrementAndGet().toString(36)}"
 
-        /** 新建空会话（IDLE） */
-        fun fresh(): RecorderState {
+        /** 新建空会话（IDLE）；date=用户选定的拜年日期（默认今天） */
+        fun fresh(date: LocalDate = LocalDate.now()): RecorderState {
             val nowMs = System.currentTimeMillis()
             return RecorderState(
                 id = newId("s"),
-                year = LocalDate.now().year,
-                date = LocalDate.now().toString(),
+                year = date.year,
+                date = date.toString(),
                 home = LatLng(0.0, 0.0),
                 nodesInit = emptyList(),
                 visitsInit = emptyList(),

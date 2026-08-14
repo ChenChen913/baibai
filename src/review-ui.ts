@@ -46,7 +46,7 @@ export function mountReviewView(
   let s = initial;
   let pl: PlaybackPlan = { pts: [], totalMs: 0 };
   let playing = false;
-  let speed = 2;
+  let speed = -1; // -1 = 总览：全程 ≤20 秒自动倍速（默认，快速看路径总览）
   let baseMs = 0;
   let animStart = 0;
   let raf = 0;
@@ -67,9 +67,11 @@ export function mountReviewView(
       <div class="pctrl">
         <button id="rv-play" class="small">▶ 播放</button>
         <button id="rv-reset" class="secondary small">重置</button>
+        <button id="rv-auto" class="secondary small">总览</button>
         <button id="rv-s1" class="secondary small">1x</button>
         <button id="rv-s2" class="secondary small">2x</button>
         <button id="rv-s4" class="secondary small">4x</button>
+        <button id="rv-s8" class="secondary small">8x</button>
         <span id="rv-progress" class="pctrl-time"></span>
       </div>
       <div class="section">
@@ -342,12 +344,30 @@ export function mountReviewView(
     });
   }
 
+  /** 实际播放倍速：总览档 = 至少 8x，且全程不超过 20 秒 */
+  function effectiveSpeed(): number {
+    return speed < 0 ? Math.max(8, pl.totalMs / 20000) : speed;
+  }
+
   function renderProgress(): void {
-    $('rv-progress').textContent = `${fmtDur(baseMs)} / ${fmtDur(pl.totalMs)} · ${speed}x`;
+    const label = speed < 0 ? '总览≈' + Math.round(effectiveSpeed()) + 'x' : speed + 'x';
+    $('rv-progress').textContent = `${fmtDur(baseMs)} / ${fmtDur(pl.totalMs)} · ${label}`;
+  }
+
+  function syncSpeedUI(): void {
+    for (const [id, v] of [
+      ['rv-auto', -1],
+      ['rv-s1', 1],
+      ['rv-s2', 2],
+      ['rv-s4', 4],
+      ['rv-s8', 8],
+    ] as [string, number][]) {
+      $(id).classList.toggle('on', speed === v);
+    }
   }
 
   function tick(): void {
-    const ms = Math.min(baseMs + (performance.now() - animStart) * speed, pl.totalMs);
+    const ms = Math.min(baseMs + (performance.now() - animStart) * effectiveSpeed(), pl.totalMs);
     // P10：视图被销毁后（如播放中返回），元素可能已不存在——安全早退，不再续帧
     const prog = root.querySelector<HTMLElement>('#rv-progress');
     if (!prog) return;
@@ -363,7 +383,8 @@ export function mountReviewView(
       dot.setAttribute('cx', pos.x.toFixed(1));
       dot.setAttribute('cy', pos.y.toFixed(1));
     }
-    prog.textContent = `${fmtDur(ms)} / ${fmtDur(pl.totalMs)} · ${speed}x`;
+    const label = speed < 0 ? '总览≈' + Math.round(effectiveSpeed()) + 'x' : speed + 'x';
+    prog.textContent = `${fmtDur(ms)} / ${fmtDur(pl.totalMs)} · ${label}`;
     if (ms >= pl.totalMs) {
       stopAnim();
       baseMs = pl.totalMs;
@@ -383,7 +404,7 @@ export function mountReviewView(
   $('rv-play').addEventListener('click', () => {
     if (pl.pts.length === 0) return;
     if (playing) {
-      baseMs = Math.min(baseMs + (performance.now() - animStart) * speed, pl.totalMs);
+      baseMs = Math.min(baseMs + (performance.now() - animStart) * effectiveSpeed(), pl.totalMs);
       stopAnim();
       return;
     }
@@ -398,17 +419,30 @@ export function mountReviewView(
     stopAnim();
     tickOnce();
   });
+  $('rv-auto').addEventListener('click', () => {
+    speed = -1;
+    renderProgress();
+    syncSpeedUI();
+  });
   $('rv-s1').addEventListener('click', () => {
     speed = 1;
     renderProgress();
+    syncSpeedUI();
   });
   $('rv-s2').addEventListener('click', () => {
     speed = 2;
     renderProgress();
+    syncSpeedUI();
   });
   $('rv-s4').addEventListener('click', () => {
     speed = 4;
     renderProgress();
+    syncSpeedUI();
+  });
+  $('rv-s8').addEventListener('click', () => {
+    speed = 8;
+    renderProgress();
+    syncSpeedUI();
   });
 
   function tickOnce(): void {
@@ -429,6 +463,7 @@ export function mountReviewView(
   }
 
   refresh();
+  syncSpeedUI();
 
   // 异步加载今年清单与往年记录（漏访/套名依赖）
   void deps.loadPlan(s.year).then((p) => {
