@@ -84,8 +84,8 @@ object Optimize {
                 order = res.order.map { ids[it] },
                 cost = res.cost,
                 exact = res.exact,
-                edges = res.order.map { v ->
-                    val u = res.order[(v + res.order.size - 1) % res.order.size]
+                edges = res.order.mapIndexed { k, v ->
+                    val u = res.order[(k + res.order.size - 1) % res.order.size]
                     RouteEdge(from = ids[u], to = ids[v], known = pairs.containsKey(pairKey(ids[u], ids[v])))
                 },
             )
