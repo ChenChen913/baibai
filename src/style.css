@@ -458,6 +458,16 @@ button:disabled {
   color: var(--ink);
 }
 
+.map-preload {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(200, 64, 47, 0.08);
+  border-radius: 999px;
+}
+
 .map-toggle .icon {
   width: 20px;
   height: 20px;

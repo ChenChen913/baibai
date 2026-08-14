@@ -30,6 +30,7 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
       onPlan: vi.fn(),
       onFeedbackToggle: vi.fn(),
       onDatePick: vi.fn(),
+      onPreload: vi.fn(),
     };
     const ui = mountUi(makeRoot(), cb);
     const click = (id: string) => {
@@ -59,6 +60,8 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
     expect(cb.onHistory).toHaveBeenCalledTimes(1);
     click('btn-date');
     expect(cb.onDatePick).toHaveBeenCalledTimes(1);
+    click('map-preload');
+    expect(cb.onPreload).toHaveBeenCalledTimes(1);
     ui.render(null, 0);
   });
 
@@ -75,6 +78,7 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
       onPlan: () => {},
       onFeedbackToggle: () => {},
       onDatePick: () => {},
+      onPreload: () => {},
     });
     const walk = () => document.querySelector<HTMLButtonElement>('#btn-walk')!;
     const bike = () => document.querySelector<HTMLButtonElement>('#btn-bike')!;

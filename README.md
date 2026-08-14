@@ -5,6 +5,22 @@
 
 记录大年初一走村串户的真实轨迹，拜完年回放路线、算出「当日最优」与「飞行最优」，三线动画对比——看看自己今年绕了多少路。年度独立、每年一局、纯本地、自己玩。
 
+## 借鉴与署名（Acknowledgements）
+
+本项目为原创项目（git 历史单根提交），未复刻任何仓库；但以下项目/数据源为本项目提供了思路、组件或数据，特此署名致谢：
+
+| 来源 | 用途 | 许可 |
+|---|---|---|
+| [Organic Maps](https://organicmaps.app)（GitHub: organicmaps/organicmaps） | **离线优先地图架构思路**（离线底图、省电定位调度、断点续传下载），参考调研见 [调研与移植规划](./docs/organicmaps-调研与移植规划.md)；未直接复用其代码或地图数据 | Apache-2.0（代码）/ ODbL（地图数据） |
+| [OpenStreetMap](https://www.openstreetmap.org) | 网页版备用瓦片（瓦片失败时的兜底源） | © OpenStreetMap contributors（ODbL） |
+| 高德地图瓦片 | 安卓/网页主底图（普通地图 + 卫星图） | 遵循高德瓦片服务条款 |
+| [Leaflet](https://leafletjs.com) | 地图交互引擎（两端） | BSD-2-Clause |
+
+> 若未来直接使用 Organic Maps 的代码或地图数据，按其要求须在可见位置署名
+> "Map data © OpenStreetMap and Organic Maps" 并附可点击链接、禁止白标——详见 [实施手册 §合规](./docs/离线地图改造-实施手册.md)。
+
+第三方依赖许可详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+
 ## 文档
 
 - 📄 [项目需求文档](./docs/项目需求文档.md)（22 项决策共识）

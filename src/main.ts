@@ -25,6 +25,7 @@ import {
 } from './db.js';
 import type { Fix } from './geo.js';
 import { cnyLabel, fromDateStr, toDateStr } from './cny.js';
+import { preloadTileList } from './tiles.js';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 const gps = new GpsTracker();
@@ -108,6 +109,25 @@ function handleGpsError(kind: GpsErrorKind): void {
   ui.toast(tips[kind]);
 }
 
+// P0：瓦片预载（每个 Home 只自动预载一次；手动按钮随时可再触发）
+let preloadedFor = '';
+function startTilePreload(home: { lat: number; lng: number }): void {
+  const tiles = preloadTileList(home.lat, home.lng);
+  const ctrl = navigator.serviceWorker?.controller;
+  if (!ctrl) {
+    ui.toast('离线预载需要 Service Worker（线上版本可用）');
+    return;
+  }
+  ctrl.postMessage({ type: 'baibai-preload', tiles });
+  ui.toast('正在预载周边地图（' + tiles.length + ' 张）…');
+}
+function maybePreloadTiles(home: { lat: number; lng: number }): void {
+  const key = home.lat.toFixed(4) + ',' + home.lng.toFixed(4);
+  if (key === preloadedFor) return;
+  preloadedFor = key;
+  startTilePreload(home);
+}
+
 /** 把当前会话状态同步到地图（轨迹/节点/Home/当前位置） */
 function syncMap(): void {
   if (!mapCtrl || !recorder) return;
@@ -123,6 +143,7 @@ function syncMap(): void {
   });
   mapCtrl.setTrack(s.points.map((p) => p.pos), breaks);
   mapCtrl.setNodes(s.home, s.nodes);
+  if (s.home.lat !== 0 || s.home.lng !== 0) maybePreloadTiles(s.home);
   const last = s.points[s.points.length - 1];
   if (last) mapCtrl.follow(last.pos.lat, last.pos.lng);
   else mapCtrl.follow(s.home.lat, s.home.lng);
@@ -249,6 +270,14 @@ function mountRecord(): Ui {
     },
     onDatePick() {
       pickBizDate();
+    },
+    onPreload() {
+      const home = recorder?.snapshot.home;
+      if (home && (home.lat !== 0 || home.lng !== 0)) {
+        startTilePreload(home);
+      } else {
+        ui.toast('先开始拜年拿到定位，再点「预载」');
+      }
     },
   });
   mapCtrl = mountMap(
@@ -678,6 +707,22 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 // 地图折叠/展开后重算 Leaflet 尺寸（P5）
 window.addEventListener('baibai-map-resize', () => {
   mapCtrl?.invalidateSize?.();
+});
+
+// P0：SW 预载完成回调 → 提示结果
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  const d = e.data as { type?: string; ok?: number; total?: number } | null;
+  if (d?.type === 'baibai-preload-done') {
+    try {
+      ui.toast(
+        (d.ok ?? 0) > 0
+          ? '已预载 ' + d.ok + ' 张瓦片，断网也能看地图'
+          : '预载失败：请检查网络后重试',
+      );
+    } catch {
+      /* 视图已切换则忽略 */
+    }
+  }
 });
 
 // D22.5 全局错误边界：未捕获异常写日志 + 提示，绝不静默冻结（P3）

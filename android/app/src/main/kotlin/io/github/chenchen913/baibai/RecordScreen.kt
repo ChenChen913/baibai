@@ -1,6 +1,8 @@
 package io.github.chenchen913.baibai
 
 import android.annotation.SuppressLint
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -51,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -68,7 +72,10 @@ import io.github.chenchen913.baibai.core.cny.Cny
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.SessionState
 import io.github.chenchen913.baibai.core.model.TrackPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -447,6 +454,27 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
     val session = RecorderHub.session.collectAsState().value
     val syncKey = (session?.state ?: SessionState.IDLE) to (session?.nodes?.size ?: 0)
 
+    // P0 离线瓦片缓存：Home 确定后自动预载周边；手动按钮随时可再预载
+    val tileCache = remember { TileCache(LocalContext.current.applicationContext) }
+    val scope = rememberCoroutineScope()
+    var preloading by remember { mutableStateOf(false) }
+    var preloadedFor by remember { mutableStateOf<String?>(null) }
+
+    fun startPreload(homeLat: Double, homeLng: Double) {
+        if (preloading) return
+        preloading = true
+        val urls = TileMath.preloadList(homeLat, homeLng)
+        RecorderHub.toast("正在预载周边地图（" + urls.size + " 张，约几 MB）…")
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { tileCache.preload(urls) }
+            preloading = false
+            RecorderHub.toast(
+                if (ok > 0) "已预载 " + ok + " 张瓦片，断网也能看地图"
+                else "预载失败：请检查网络后重试",
+            )
+        }
+    }
+
     // 全量同步：页面就绪 / 状态或户数变化 / 重新展开 → 推整条轨迹 + 家/户标记
     LaunchedEffect(pageReady, syncKey, mapOpen) {
         if (!pageReady || !mapOpen) return@LaunchedEffect
@@ -461,6 +489,15 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                 "BaibaiMap.setNodes(" + latLngJson(snap.home) + ", " + nodesJson(snap.nodes) + ")",
                 null,
             )
+            // P0：Home 确定后自动预载周边瓦片（每个 Home 只预载一次）
+            val homeValid = snap.home.lat != 0.0 || snap.home.lng != 0.0
+            if (homeValid) {
+                val key = "%.5f,%.5f".format(snap.home.lat, snap.home.lng)
+                if (preloadedFor != key) {
+                    preloadedFor = key
+                    startPreload(snap.home.lat, snap.home.lng)
+                }
+            }
         }
     }
 
@@ -513,6 +550,24 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
             ) {
                 Text("实时轨迹", fontSize = 14.sp, fontWeight = FontWeight.Black, color = BaibaiInk)
                 Spacer(Modifier.weight(1f))
+                // P0：预载周边地图（Home 或最近一次记录的 Home）
+                Text(
+                    if (preloading) "预载中…" else "预载",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (preloading) BaibaiInk.copy(alpha = 0.4f) else BaibaiAccent,
+                    modifier = Modifier
+                        .clickable(enabled = !preloading) {
+                            val home = RecorderHub.recorder?.snapshot()?.home
+                                ?: RecorderHub.store.listSessions().maxByOrNull { it.createdAt }?.home
+                            if (home == null || (home.lat == 0.0 && home.lng == 0.0)) {
+                                RecorderHub.toast("还没有定位或历史记录：先开始拜年，再点这里预载")
+                            } else {
+                                startPreload(home.lat, home.lng)
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                )
                 // 线性折叠图标（无圆形白底），热区 ≥48dp
                 IconButton(onClick = { pageReady = false; mapOpen = false }) {
                     Icon(
@@ -537,6 +592,27 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 pageReady = true
+                            }
+
+                            // P0：瓦片请求统一走 TileCache（缓存优先→网络→缓存兜底），
+                            // 预载过的区域断网也能显示；未预载区域在线浏览时顺带入库
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                            ): WebResourceResponse? {
+                                val u = request?.url?.toString() ?: return null
+                                val isTile = u.contains("is.autonavi.com/appmaptile") ||
+                                    u.contains("tile.openstreetmap.org")
+                                if (!isTile) return null
+                                val bytes = tileCache.download(u) ?: return null
+                                return WebResourceResponse(
+                                    "image/png",
+                                    null,
+                                    200,
+                                    "OK",
+                                    mapOf("Cache-Control" to "max-age=31536000, immutable"),
+                                    java.io.ByteArrayInputStream(bytes),
+                                )
                             }
                         }
                         loadUrl("file:///android_asset/baibai_map/map.html")

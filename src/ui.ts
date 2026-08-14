@@ -15,6 +15,7 @@ export interface UiCallbacks {
   onPlan(): void;
   onFeedbackToggle(): void;
   onDatePick(): void;
+  onPreload(): void; // P0：预载周边地图瓦片
 }
 
 export interface Ui {
@@ -64,6 +65,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       <div class="map-card" id="map-card">
         <div class="map-head">
           <span class="map-title">实时地图</span>
+          <button id="map-preload" class="map-preload">预载</button>
           <button id="map-toggle" class="map-toggle" aria-label="收起地图">${ICONS.chevron}</button>
         </div>
         <div id="map"></div>
@@ -104,6 +106,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   $('btn-history').addEventListener('click', () => cb.onHistory());
   $('btn-feedback').addEventListener('click', () => cb.onFeedbackToggle());
   $('btn-date').addEventListener('click', () => cb.onDatePick());
+  $('map-preload').addEventListener('click', () => cb.onPreload());
 
   function setFeedbackOn(on: boolean): void {
     const btn = $('btn-feedback');
