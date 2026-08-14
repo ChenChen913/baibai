@@ -48,7 +48,8 @@ npm test         # vitest 单元测试（111 项）
 
 ## 更新记录
 
-- A-M1 第 3 步（2026-08-14）：**前台服务落地，A-M1 代码完成**——`LocationService`（foregroundServiceType="location" + 常驻通知 + START_STICKY 静默恢复检查点）、四层防杀全部就位（前台服务/自重启/白名单引导/检查点续录）；Robolectric 测试增至 5 项（含常驻通知断言与恢复逻辑）；Android CI 全绿（core 38 + app 5 = **43 项**）；APK 8.6MB 待真机验收。
+- A-M2 第 1 步（2026-08-14）：**core 直译完成**——`Smooth.kt`（切段/滑动平均/DP 抽稀）、`Track.kt`（边分段/视口投影）、`Playback.kt`（回放计划/插值）、`Review.kt`（改名/合并/拆分/剔除/重编号）、`Demo.kt`（演示数据生成器）+ **39 项对照测试一次全绿**；Android CI 通过（core 77 + app 5 = **82 项**）。
+- A-M1 第 3 步（2026-08-14）：**前台服务落地，A-M1 代码完成**——四层防杀全部就位；Robolectric 测试增至 5 项；Android CI 全绿（43 项）。
 - A-M1 第 2 步（2026-08-14）：**app 层落地**——Compose 记录页、定位权限请求、省电白名单引导页、`RecorderHub` 全链路、`LocationSource` 抽象；Robolectric 集成测试 3 项；Android CI 全绿（41 项）。
 - A-M1 第 1 步（2026-08-14）：**Android 工程落地**——Gradle 双模块骨架（core 纯算法 / app 壳）、`Geo.kt`/`RecorderState.kt`/`JsonStore.kt`/`GpsErrors.kt` 从 TS 直译、**38 项对照测试**；Android CI 云端构建通过；修复原子写截断 bug。
 - 前置任务·补充（2026-08-13）：新增 `android/开发环境与流程.md`；SPEC §9 双版本共存策略定案。
