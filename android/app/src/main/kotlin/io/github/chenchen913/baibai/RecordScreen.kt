@@ -455,7 +455,8 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
     val syncKey = (session?.state ?: SessionState.IDLE) to (session?.nodes?.size ?: 0)
 
     // P0 离线瓦片缓存：Home 确定后自动预载周边；手动按钮随时可再预载
-    val tileCache = remember { TileCache(LocalContext.current.applicationContext) }
+    val appContext = LocalContext.current.applicationContext
+    val tileCache = remember { TileCache(appContext) }
     val scope = rememberCoroutineScope()
     var preloading by remember { mutableStateOf(false) }
     var preloadedFor by remember { mutableStateOf<String?>(null) }
