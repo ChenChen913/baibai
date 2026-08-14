@@ -19,119 +19,249 @@
     color:rgba(90,58,42,.5); background:rgba(255,255,255,.6);
     padding:1px 6px; border-radius:8px 0 0 0; pointer-events:none;
   }
+  .layer-switch { position:absolute; top:10px; right:10px; z-index:1000; display:flex; gap:6px; }
+  .layer-switch button {
+    border:0; border-radius:999px; padding:8px 14px; font-size:13px; font-weight:700;
+    background:rgba(255,255,255,.94); color:#5A3A2A; box-shadow:0 2px 8px rgba(90,58,42,.18);
+  }
+  .layer-switch button.on {
+    background:linear-gradient(135deg,#C8402F,#A62D22); color:#fff;
+  }
 </style>
 </head>
 <body>
 <div id="map"></div>
-<div class="attribution">© OpenStreetMap</div>
+<div class="layer-switch">
+  <button id="btn-street" class="on">地图</button>
+  <button id="btn-sat">卫星</button>
+</div>
+<div class="attribution">© 高德地图 / OpenStreetMap</div>
 <script src="leaflet.js"></script>
 <script>
 (function () {
-  var map = L.map('map', { zoomControl: false, attributionControl: false, center: [36.71, 119.1], zoom: 13 });
+  var map = L.map('map', { zoomControl:false, attributionControl:false, center:[36.71,119.1], zoom:14 });
 
-  // 瓦片源（免 Key、免费）：OSM 主源 → OSM-HOT 备源，失败自动切换；全部失败时纸色底兜底，轨迹照常绘制
-  var sources = [
-    { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub: null },
-    { url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', sub: 'abc' }
-  ];
-  var srcIndex = 0;
-  var errCount = 0;
+  /* ---------- WGS-84 → GCJ-02（高德瓦片是火星坐标，定位是 WGS-84，必须转换） ---------- */
+  var PI = Math.PI, A = 6378245.0, EE = 0.00669342162296594323;
+  function outOfChina(lat, lng) { return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271; }
+  function tLat(x, y) {
+    var r = -100.0 + 2.0*x + 3.0*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x));
+    r += (20.0*Math.sin(6.0*x*PI) + 20.0*Math.sin(2.0*x*PI)) * 2.0/3.0;
+    r += (20.0*Math.sin(y*PI) + 40.0*Math.sin(y/3.0*PI)) * 2.0/3.0;
+    r += (160.0*Math.sin(y/12.0*PI) + 320*Math.sin(y*PI/30.0)) * 2.0/3.0;
+    return r;
+  }
+  function tLng(x, y) {
+    var r = 300.0 + x + 2.0*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x));
+    r += (20.0*Math.sin(6.0*x*PI) + 20.0*Math.sin(2.0*x*PI)) * 2.0/3.0;
+    r += (20.0*Math.sin(x*PI) + 40.0*Math.sin(x/3.0*PI)) * 2.0/3.0;
+    r += (150.0*Math.sin(x/12.0*PI) + 300.0*Math.sin(x/30.0*PI)) * 2.0/3.0;
+    return r;
+  }
+  function wgs2gcj(lat, lng) {
+    if (outOfChina(lat, lng)) return [lat, lng];
+    var dLat = tLat(lng - 105.0, lat - 35.0);
+    var dLng = tLng(lng - 105.0, lat - 35.0);
+    var radLat = lat / 180.0 * PI;
+    var magic = Math.sin(radLat);
+    magic = 1 - EE * magic * magic;
+    var sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / ((A * (1 - EE)) / (magic * sqrtMagic) * PI);
+    dLng = (dLng * 180.0) / (A / sqrtMagic * Math.cos(radLat) * PI);
+    return [lat + dLat, lng + dLng];
+  }
+  var useGcj = true; // 高德瓦片=GCJ；回退 OSM 时切回 WGS
+  function cvt(p) {
+    if (!useGcj) return [p[0], p[1]];
+    return wgs2gcj(p[0], p[1]);
+  }
 
-  function addTile() {
-    if (srcIndex >= sources.length) return;
-    var s = sources[srcIndex];
+  /* ---------- 图层：普通地图（高德→OSM 兜底）+ 卫星（高德） ---------- */
+  var street = null, sat = null, curLayer = 'street';
+  var streetSrc = 0, streetErr = 0, satErr = 0;
+
+  function makeStreet() {
+    var isGaode = streetSrc === 0;
+    var url = isGaode
+      ? 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
+      : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
     var opts = { maxZoom: 19 };
-    if (s.sub) opts.subdomains = s.sub;
-    var layer = L.tileLayer(s.url, opts);
+    if (isGaode) opts.subdomains = '1234';
+    var layer = L.tileLayer(url, opts);
     layer.on('tileerror', function () {
-      errCount += 1;
-      if (errCount > 6 && srcIndex < sources.length - 1) {
-        errCount = 0;
-        srcIndex += 1;
+      streetErr += 1;
+      if (streetErr > 6 && streetSrc === 0) {
+        streetSrc = 1;
+        streetErr = 0;
+        useGcj = false; // OSM 是 WGS-84，切回原坐标
         map.removeLayer(layer);
-        addTile();
+        makeStreet();
+        redrawAll();
+        return;
       }
     });
+    street = layer;
+    if (curLayer === 'street') street.addTo(map);
+  }
+
+  function makeSat() {
+    sat = L.tileLayer(
+      'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
+      { maxZoom: 19, subdomains: '1234' },
+    );
+    sat.on('tileerror', function () { satErr += 1; });
+    if (curLayer === 'sat') sat.addTo(map);
+  }
+
+  function syncButtons() {
+    var b1 = document.getElementById('btn-street');
+    var b2 = document.getElementById('btn-sat');
+    if (!b1 || !b2) return;
+    b1.className = curLayer === 'street' ? 'on' : '';
+    b2.className = curLayer === 'sat' ? 'on' : '';
+  }
+  document.getElementById('btn-street').addEventListener('click', function () {
+    if (sat && map.hasLayer(sat)) map.removeLayer(sat);
+    if (street) street.addTo(map);
+    curLayer = 'street';
+    syncButtons();
+  });
+  document.getElementById('btn-sat').addEventListener('click', function () {
+    if (street && map.hasLayer(street)) map.removeLayer(street);
+    if (sat) sat.addTo(map);
+    curLayer = 'sat';
+    syncButtons();
+  });
+
+  makeStreet();
+  makeSat();
+  syncButtons();
+
+  /* ---------- 轨迹（分段：走过=淡红，当前段=实红粗线，像导航一样实时增长） ---------- */
+  var rawTrack = [];      // WGS-84 [[lat,lng],...]
+  var segBreaks = [0];
+  var lastT = 0;
+  var segGroup = L.layerGroup().addTo(map);
+
+  function drawSegments() {
+    segGroup.clearLayers();
+    for (var i = 0; i < segBreaks.length; i++) {
+      var a = segBreaks[i];
+      var b = (i + 1 < segBreaks.length) ? segBreaks[i + 1] : rawTrack.length;
+      if (b - a < 2) continue;
+      var pts = [];
+      for (var k = a; k < b; k++) pts.push(cvt(rawTrack[k]));
+      var isCurrent = (i === segBreaks.length - 1);
+      L.polyline(pts, {
+        color: '#C8402F',
+        weight: isCurrent ? 5 : 4,
+        opacity: isCurrent ? 0.95 : 0.35,
+        lineJoin: 'round',
+      }).addTo(segGroup);
+    }
+  }
+
+  /* ---------- 当前位置点 + 精度圈 ---------- */
+  var me = null, accCircle = null;
+  function drawMe(lat, lng, acc) {
+    var c = cvt([lat, lng]);
+    if (!me) {
+      me = L.circleMarker(c, {
+        radius: 9, color: '#ffffff', weight: 2.5, fillColor: '#C8402F', fillOpacity: 1,
+      }).addTo(map);
+    } else {
+      me.setLatLng(c);
+    }
+    if (accCircle) { map.removeLayer(accCircle); accCircle = null; }
+    if (acc && acc > 0) {
+      accCircle = L.circle(c, {
+        radius: acc, color: '#C8402F', weight: 1, fillColor: '#C8402F', fillOpacity: 0.07, interactive: false,
+      }).addTo(map);
+    }
+  }
+
+  /* ---------- 家/户标记 ---------- */
+  var rawHome = null, rawNodes = [];
+  var nodeGroup = null;
+  function drawNodes() {
+    var layer = L.layerGroup();
+    if (rawHome && (rawHome.lat !== 0 || rawHome.lng !== 0)) {
+      var hc = cvt([rawHome.lat, rawHome.lng]);
+      L.marker(hc, {
+        icon: L.divIcon({ className: 'baibai-home-icon', html: '<div class="home-pin">家</div>', iconSize: [30,30], iconAnchor: [15,15] }),
+        zIndexOffset: 200,
+      }).addTo(layer);
+    }
+    for (var i = 0; i < rawNodes.length; i++) {
+      var n = rawNodes[i];
+      var nc = cvt([n.lat, n.lng]);
+      var m = L.marker(nc, {
+        icon: L.divIcon({ className: 'baibai-node-icon', html: '<div class="node-pin">' + n.n + '</div>', iconSize: [26,26], iconAnchor: [13,13] }),
+        zIndexOffset: 150,
+      });
+      if (n.name) {
+        var label = document.createElement('div');
+        label.textContent = n.name;
+        m.bindTooltip(label, { direction: 'top', offset: [0, -14] });
+      }
+      m.addTo(layer);
+    }
+    if (nodeGroup) map.removeLayer(nodeGroup);
+    nodeGroup = layer;
     layer.addTo(map);
   }
-  addTile();
 
-  var track = L.polyline([], { color: '#C8402F', weight: 4, opacity: 0.85, lineJoin: 'round' }).addTo(map);
-  var trackPts = [];
-  var lastT = 0;
-  var me = null;
-  var accCircle = null;
-  var nodeLayer = L.layerGroup().addTo(map);
+  function redrawAll() {
+    drawSegments();
+    drawNodes();
+    if (me) {
+      var p = me.getLatLng();
+      drawMe(p.lat, p.lng, 0);
+    }
+  }
 
   window.BaibaiMap = {
-    // 追加最新定位点（按时间戳去重），视野跟随当前位置
+    // 追加最新定位点（按时间戳去重），视野跟随当前位置，当前段实时增长
     follow: function (lat, lng, acc, t) {
       if (!isFinite(lat) || !isFinite(lng)) return;
       if (t && t === lastT) return;
       lastT = t || 0;
-      trackPts.push([lat, lng]);
-      track.setLatLngs(trackPts);
-      if (!me) {
-        me = L.circleMarker([lat, lng], {
-          radius: 9, color: '#ffffff', weight: 2.5, fillColor: '#C8402F', fillOpacity: 1
-        }).addTo(map);
-      } else {
-        me.setLatLng([lat, lng]);
-      }
-      if (accCircle) { map.removeLayer(accCircle); accCircle = null; }
-      if (acc && acc > 0) {
-        accCircle = L.circle([lat, lng], {
-          radius: acc, color: '#C8402F', weight: 1, fillColor: '#C8402F', fillOpacity: 0.07, interactive: false
-        }).addTo(map);
-      }
-      map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: true });
+      rawTrack.push([lat, lng]);
+      drawSegments();
+      drawMe(lat, lng, acc);
+      map.setView(cvt([lat, lng]), Math.max(map.getZoom(), 16), { animate: true });
     },
 
-    // 整条轨迹（恢复/继续/重新展开时全量同步）
-    setTrack: function (pts) {
+    // 只显示当前位置（开始拜年前的等待期：还没轨迹，先看到自己在哪）
+    locate: function (lat, lng, acc) {
+      if (!isFinite(lat) || !isFinite(lng)) return;
+      drawMe(lat, lng, acc);
+      map.setView(cvt([lat, lng]), Math.max(map.getZoom(), 16), { animate: true });
+    },
+
+    // 整条轨迹 + 段起点下标（恢复/继续/重新展开时全量同步）
+    setTrack: function (pts, breaks) {
       lastT = 0;
-      trackPts = [];
+      rawTrack = [];
       for (var i = 0; i < pts.length; i++) {
         var p = pts[i];
-        if (p && isFinite(p[0]) && isFinite(p[1])) trackPts.push([p[0], p[1]]);
+        if (p && isFinite(p[0]) && isFinite(p[1])) rawTrack.push([p[0], p[1]]);
       }
-      track.setLatLngs(trackPts);
-      if (trackPts.length > 1) {
-        map.fitBounds(L.latLngBounds(trackPts).pad(0.25));
+      segBreaks = (breaks && breaks.length) ? breaks.slice() : [0];
+      drawSegments();
+      if (rawTrack.length > 1) {
+        var bounds = [];
+        for (var k = 0; k < rawTrack.length; k++) bounds.push(cvt(rawTrack[k]));
+        map.fitBounds(L.latLngBounds(bounds).pad(0.25));
       }
     },
 
     // 家（金）+ 户（红圈数字，悬浮户名）
     setNodes: function (home, nodes) {
-      nodeLayer.clearLayers();
-      if (home && isFinite(home.lat) && isFinite(home.lng) && (home.lat !== 0 || home.lng !== 0)) {
-        L.marker([home.lat, home.lng], {
-          icon: L.divIcon({
-            className: 'baibai-home-icon',
-            html: '<div class="home-pin">家</div>',
-            iconSize: [30, 30], iconAnchor: [15, 15]
-          }),
-          zIndexOffset: 200
-        }).addTo(nodeLayer);
-      }
-      for (var i = 0; i < (nodes ? nodes.length : 0); i++) {
-        var n = nodes[i];
-        var m = L.marker([n.lat, n.lng], {
-          icon: L.divIcon({
-            className: 'baibai-node-icon',
-            html: '<div class="node-pin">' + n.n + '</div>',
-            iconSize: [26, 26], iconAnchor: [13, 13]
-          }),
-          zIndexOffset: 150
-        });
-        if (n.name) {
-          var label = document.createElement('div');
-          label.textContent = n.name;
-          m.bindTooltip(label, { direction: 'top', offset: [0, -14] });
-        }
-        m.addTo(nodeLayer);
-      }
-    }
+      rawHome = home || null;
+      rawNodes = nodes || [];
+      drawNodes();
+    },
   };
 })();
 </script>

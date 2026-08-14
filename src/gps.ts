@@ -2,7 +2,7 @@
 
 import type { Fix } from './geo.js';
 
-const BUFFER_MAX = 8;
+const BUFFER_MAX = 16; // 中位数样本更多，定位更稳（结束/暂停取最近 10 个）
 
 export type GpsErrorKind = 'unsupported' | 'denied' | 'unavailable' | 'timeout';
 

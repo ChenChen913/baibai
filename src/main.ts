@@ -50,6 +50,9 @@ const escHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 let recorder: RecorderState | null = null;
 let pendingStart = false;
+// 首个定位的缓冲：攒 3 个 fix（或 3 秒）取中位数定 Home——单个 fix 噪声大（±10m+）
+const pendingFixes: Fix[] = [];
+let pendingStartAt = 0;
 let wakeLock: { release: () => Promise<void> } | null = null;
 let view: 'record' | 'history' | 'review' | 'optimize' | 'plan' = 'record';
 let mapCtrl: MapController | null = null;
@@ -109,7 +112,16 @@ function handleGpsError(kind: GpsErrorKind): void {
 function syncMap(): void {
   if (!mapCtrl || !recorder) return;
   const s = recorder.snapshot;
-  mapCtrl.setTrack(s.points.map((p) => p.pos));
+  // 段起点下标：走过段淡红、当前段实红粗线（像导航一样实时增长）
+  const breaks: number[] = [];
+  let curSeg = '';
+  s.points.forEach((p, i) => {
+    if (p.seg !== curSeg) {
+      breaks.push(i);
+      curSeg = p.seg;
+    }
+  });
+  mapCtrl.setTrack(s.points.map((p) => p.pos), breaks);
   mapCtrl.setNodes(s.home, s.nodes);
   const last = s.points[s.points.length - 1];
   if (last) mapCtrl.follow(last.pos.lat, last.pos.lng);
@@ -129,9 +141,9 @@ function flush(): void {
 
 function elapsedMs(): number {
   if (!recorder) return 0;
-  const s = recorder.snapshot;
-  const t0 = s.points[0]?.t ?? s.createdAt;
-  return Math.max(0, now() - t0);
+  // t0 用会话创建时刻（首个定位时刻），不用 points[0].t——
+  // 首点迟到会让计时倒退（实机复现：定位稀疏时时间回跳/停滞）
+  return Math.max(0, now() - recorder.snapshot.createdAt);
 }
 
 function mountRecord(): Ui {
@@ -139,6 +151,8 @@ function mountRecord(): Ui {
     onStart() {
       if (recorder) return;
       pendingStart = true;
+      pendingFixes.length = 0;
+      pendingStartAt = now();
       try {
         gps.start({ onFix, onError: handleGpsError });
         void requestWakeLock();
@@ -160,7 +174,7 @@ function mountRecord(): Ui {
     onPause() {
       if (!recorder) return;
       try {
-        recorder.pause(gps.recent(3), now());
+        recorder.pause(gps.recent(10), now());
         gps.stop(); // SPEC §7：PAUSED 停 GPS（省电 + 防屋内漂移）
         vibrate();
         beep();
@@ -194,7 +208,7 @@ function mountRecord(): Ui {
     },
     onFinish() {
       if (!recorder) return;
-      const res = recorder.finish(gps.recent(3), now());
+      const res = recorder.finish(gps.recent(10), now());
       if (!res.ok) {
         // P18：无定位时不显示 Infinity；P17：§7.8 文案与按钮
         const distText = Number.isFinite(res.distM)
@@ -203,7 +217,7 @@ function mountRecord(): Ui {
         void confirmDialog('结束拜年', `${distText}，仍要结束吗？`, '强制结束', '取消').then((go) => {
           if (!go || !recorder) return;
           try {
-            recorder.finish(gps.recent(3), now(), true);
+            recorder.finish(gps.recent(10), now(), true);
             complete();
           } catch (e) {
             ui.toast((e as Error).message);
@@ -305,24 +319,30 @@ ui = mountRecord();
 
 function onFix(f: Fix): void {
   if (pendingStart && !recorder) {
-    recorder = new RecorderState({
-      date: toDateStr(bizDate),
-      year: bizDate.getFullYear(),
-    });
-    try {
-      recorder.start([f], now(), f);
-    } catch (e) {
-      recorder = null;
-      ui.toast((e as Error).message);
-      return;
+    // 攒 3 个 fix（或 3 秒）→ 中位数定 Home；单个 fix 噪声太大
+    pendingFixes.push(f);
+    if (pendingFixes.length >= 3 || now() - pendingStartAt >= 3000) {
+      recorder = new RecorderState({
+        date: toDateStr(bizDate),
+        year: bizDate.getFullYear(),
+      });
+      try {
+        recorder.start(pendingFixes, now(), f);
+      } catch (e) {
+        recorder = null;
+        pendingFixes.length = 0;
+        ui.toast((e as Error).message);
+        return;
+      }
+      pendingFixes.length = 0;
+      pendingStart = false;
+      window.clearTimeout(gpsWatchdog);
+      vibrate();
+      beep();
+      flush();
+      syncMap();
+      ui.toast('开始记录！到一户按「暂停」');
     }
-    pendingStart = false;
-    window.clearTimeout(gpsWatchdog);
-    vibrate();
-    beep();
-    flush();
-    syncMap();
-    ui.toast('开始记录！到一户按「暂停」');
     return;
   }
   if (recorder) {

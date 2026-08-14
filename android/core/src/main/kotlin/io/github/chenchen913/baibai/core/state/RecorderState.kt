@@ -208,7 +208,7 @@ class RecorderState private constructor(
         val good = fixes.filter { it.acc <= Constants.GOOD_ACC_M }
         val pos = Geo.medianPos(good.map { it.pos }) ?: fixes.lastOrNull()?.pos
         val distM = pos?.let { Geo.haversineM(it, home) } ?: Double.POSITIVE_INFINITY
-        if (pos != null && distM <= Constants.MERGE_THRESHOLD_M) {
+        if (pos != null && distM <= Constants.FINISH_OK_M) {
             finalize(now)
             return FinishResult.Ok
         }

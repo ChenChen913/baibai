@@ -453,7 +453,10 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
         val w = webView.value ?: return@LaunchedEffect
         val snap = RecorderHub.recorder?.snapshot()
         if (snap != null) {
-            w.evaluateJavascript("BaibaiMap.setTrack(" + trackJson(snap.points) + ")", null)
+            w.evaluateJavascript(
+                "BaibaiMap.setTrack(" + trackJson(snap.points) + ", " + segBreaksJson(snap.points) + ")",
+                null,
+            )
             w.evaluateJavascript(
                 "BaibaiMap.setNodes(" + latLngJson(snap.home) + ", " + nodesJson(snap.nodes) + ")",
                 null,
@@ -461,18 +464,28 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
         }
     }
 
-    // 增量跟随：每 1.2s 推最新定位点（JS 按时间戳去重，轨迹实时增长）
+    // 增量跟随：每 1.2s 推最新定位点（JS 按时间戳去重，当前段实时增长）；
+    // 等待首个定位期间（还没开始记录）也实时显示当前位置
     LaunchedEffect(Unit) {
         while (true) {
             delay(1200)
             if (pageReady && mapOpen) {
                 val w = webView.value
-                val last = RecorderHub.recorder?.snapshot()?.points?.lastOrNull()
-                if (w != null && last != null) {
-                    w.evaluateJavascript(
-                        "BaibaiMap.follow(" + last.pos.lat + "," + last.pos.lng + "," + last.acc + "," + last.t + ")",
-                        null,
-                    )
+                if (w != null) {
+                    val last = RecorderHub.recorder?.snapshot()?.points?.lastOrNull()
+                    if (last != null) {
+                        w.evaluateJavascript(
+                            "BaibaiMap.follow(" + last.pos.lat + "," + last.pos.lng + "," + last.acc + "," + last.t + ")",
+                            null,
+                        )
+                    } else {
+                        RecorderHub.source?.lastFix?.let { lf ->
+                            w.evaluateJavascript(
+                                "BaibaiMap.locate(" + lf.pos.lat + "," + lf.pos.lng + "," + lf.acc + ")",
+                                null,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -613,6 +626,20 @@ private fun nodesJson(nodes: List<io.github.chenchen913.baibai.core.model.HouseN
 
 private fun latLngJson(p: io.github.chenchen913.baibai.core.model.LatLng): String =
     JSONObject().put("lat", p.lat).put("lng", p.lng).toString()
+
+/** 段起点下标（seg 变化处）→ JS 参数 JSON：[0, 55, 120, ...] */
+private fun segBreaksJson(points: List<TrackPoint>): String {
+    val arr = JSONArray()
+    var cur: String? = null
+    for (i in points.indices) {
+        val seg = points[i].seg
+        if (seg != cur) {
+            arr.put(i)
+            cur = seg
+        }
+    }
+    return arr.toString()
+}
 
 /* ---------- 4. 主按钮区（同一时刻只显示一个主按钮，§8） ---------- */
 

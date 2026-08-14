@@ -73,6 +73,10 @@ object RecorderHub {
     private var flushTimerStarted = false
     private var lastSessionEmit = 0L // M-5：定位 fix 的 session 快照节流（5s）
 
+    // 首个定位缓冲：攒 3 个 fix（或 3 秒）取中位数定 Home——单个 fix 噪声大（±10m+）
+    private val pendingFixes = mutableListOf<Fix>()
+    private var pendingStartAt = 0L
+
     fun init(app: Application) {
         if (this::store.isInitialized) return
         context = app.applicationContext
@@ -173,6 +177,8 @@ object RecorderHub {
 
     fun startPressed() {
         if (recorder != null) return
+        pendingFixes.clear()
+        pendingStartAt = nowMs()
         startKeepAliveService()
         _waiting.value = true
         ensureSourceRunning()
@@ -191,7 +197,7 @@ object RecorderHub {
     fun pausePressed() {
         val r = recorder ?: return
         try {
-            r.pause(source?.recent(3) ?: emptyList(), nowMs())
+            r.pause(source?.recent(10) ?: emptyList(), nowMs())
             stopLocationSource() // SPEC §7：PAUSED 停定位（省电 + 防屋内漂移）
             vibrate()
             beep()
@@ -230,7 +236,7 @@ object RecorderHub {
     fun finishPressed(force: Boolean = false): FinishResult? {
         val r = recorder ?: return null
         val res = try {
-            r.finish(source?.recent(3) ?: emptyList(), nowMs(), force)
+            r.finish(source?.recent(10) ?: emptyList(), nowMs(), force)
         } catch (e: IllegalStateException) {
             emit(e.message ?: "操作失败") // 双击等非法转移不再崩溃
             return null
@@ -286,20 +292,27 @@ object RecorderHub {
         _gpsAcc.value = f.acc
         val r = recorder
         if (r == null && _waiting.value) {
-            val fresh = RecorderState.fresh(_bizDate.value)
-            try {
-                fresh.start(listOf(f), nowMs(), f)
-            } catch (e: Exception) {
-                emit(e.message ?: "定位启动失败")
-                return
+            // 攒 3 个 fix（或 3 秒）→ 中位数定 Home；单个 fix 噪声太大
+            pendingFixes.add(f)
+            val t = nowMs()
+            if (pendingFixes.size >= 3 || t - pendingStartAt >= 3000) {
+                val fresh = RecorderState.fresh(_bizDate.value)
+                try {
+                    fresh.start(pendingFixes.toList(), t, f)
+                } catch (e: Exception) {
+                    pendingFixes.clear()
+                    emit(e.message ?: "定位启动失败")
+                    return
+                }
+                recorder = fresh
+                _waiting.value = false
+                watchdogJob?.cancel()
+                vibrate()
+                flushNow()
+                _session.value = fresh.snapshot()
+                pendingFixes.clear()
+                emit("开始记录！到一户按「暂停」")
             }
-            recorder = fresh
-            _waiting.value = false
-            watchdogJob?.cancel()
-            vibrate()
-            flushNow()
-            _session.value = fresh.snapshot()
-            emit("开始记录！到一户按「暂停」")
             return
         }
         if (r != null) {
@@ -335,8 +348,9 @@ object RecorderHub {
 
     fun elapsedMs(): Long {
         val s = _session.value ?: return 0
-        val t0 = s.points.firstOrNull()?.t ?: s.createdAt
-        return (nowMs() - t0).coerceAtLeast(0)
+        // t0 用会话创建时刻（首个定位时刻），不用 points[0].t——
+        // 首点迟到会让计时倒退（实机复现：定位稀疏时时间回跳/停滞）
+        return (nowMs() - s.createdAt).coerceAtLeast(0)
     }
 
     // ---------- 内部 ----------
@@ -397,6 +411,7 @@ object RecorderHub {
     /** 仅测试用：清空运行时状态（可选保留存储，用于"崩溃恢复"场景模拟） */
     fun resetForTest(clearStore: Boolean) {
         recorder = null
+        pendingFixes.clear()
         _waiting.value = false
         _pendingRestore.value = false
         _session.value = null

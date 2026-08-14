@@ -202,6 +202,15 @@ describe('撤销（D19 R2）', () => {
 });
 
 describe('Home 起止（D9/D10）', () => {
+  it('距 Home 15m 结束自动通过（FINISH_OK_M=20）', () => {
+    const r = started();
+    r.pause(fixes(far(100)), T0 + 1000);
+    r.resume(T0 + 2000);
+    const res = r.finish(fixes(far(15)), T0 + 3000);
+    expect(res).toEqual({ ok: true });
+    expect(r.state).toBe('FINISHED');
+  });
+
   it('距 Home 500m 结束被拒并可强制', () => {
     const r = started();
     r.pause(fixes(far(100)), T0 + 1000);

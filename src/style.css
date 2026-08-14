@@ -472,6 +472,33 @@ button:disabled {
 .map-card #map {
   height: 250px;
   transition: height 0.18s ease-out;
+  position: relative;
+}
+
+.baibai-layer-switch {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  gap: 6px;
+}
+
+.baibai-layer-switch button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(90, 58, 42, 0.18);
+}
+
+.baibai-layer-switch button.on {
+  background: linear-gradient(135deg, var(--accent), #a62d22);
+  color: #fff;
 }
 
 .map-card.collapsed #map {

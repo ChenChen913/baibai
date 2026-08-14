@@ -45,6 +45,7 @@ export interface SessionData {
 
 export const HOME_ID = 'home';
 export const MERGE_THRESHOLD_M = 10; // D10：≤10m 合并为同一节点
+export const FINISH_OK_M = 20; // 结束拜年自动判定半径：GPS 民码误差 ±3~10m，到家门口不烦用户
 export const GOOD_ACC_M = 50; // ≤50m 精度的 fix 才参与中位数
 export const JUMP_DIST_M = 100; // D22：跳变防护阈值
 export const JUMP_DT_MS = 2000;
@@ -213,7 +214,7 @@ export class RecorderState {
       medianPos(good.map((f) => f.pos)) ??
       (fixes.length > 0 ? fixes[fixes.length - 1].pos : null);
     const distM = pos ? haversineM(pos, this.s.home) : Infinity;
-    if (pos && distM <= MERGE_THRESHOLD_M) {
+    if (pos && distM <= FINISH_OK_M) {
       this.finalize(now);
       return { ok: true };
     }

@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 object Constants {
     const val HOME_ID = "home"
     const val MERGE_THRESHOLD_M = 10.0
+    const val FINISH_OK_M = 20.0 // 结束拜年自动判定半径：GPS 民码误差 ±3~10m，到家门口不烦用户
     const val GOOD_ACC_M = 50.0
     const val JUMP_DIST_M = 100.0
     const val JUMP_DT_MS = 2000L

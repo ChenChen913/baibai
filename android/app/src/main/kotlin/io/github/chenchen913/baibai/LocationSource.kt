@@ -42,7 +42,7 @@ class SystemLocationSource(private val context: Context) : LocationSource {
             val f = Fix(LatLng(loc.latitude, loc.longitude), loc.accuracy.toDouble())
             last = f
             buffer.addLast(f)
-            while (buffer.size > 8) buffer.removeFirst()
+            while (buffer.size > 16) buffer.removeFirst()
             cb?.onFix(f)
         }
 
@@ -62,9 +62,19 @@ class SystemLocationSource(private val context: Context) : LocationSource {
             return
         }
         try {
+            // GPS + 网络双源：GPS 民码误差大/首定慢，网络定位（WiFi/基站）互补；
+            // 两个源的点一起进缓冲做中位数，Home/户点/结束判定都更稳（实机 17m 偏差主因之一）
             @Suppress("MissingPermission")
             lm.requestLocationUpdates(
                 LocationManager.GPS_PROVIDER,
+                1000L,
+                0f,
+                listener,
+                Looper.getMainLooper(),
+            )
+            @Suppress("MissingPermission")
+            lm.requestLocationUpdates(
+                LocationManager.NETWORK_PROVIDER,
                 1000L,
                 0f,
                 listener,

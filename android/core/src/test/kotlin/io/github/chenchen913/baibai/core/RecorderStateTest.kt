@@ -229,6 +229,15 @@ class RecorderStateTest {
     // ---------- Home 起止（D9/D10） ----------
 
     @Test
+    fun `距 Home 15m 结束自动通过（FINISH_OK_M=20）`() {
+        val r = started()
+        r.pause(fixes(far(100.0)), T0 + 1000)
+        r.resume(T0 + 2000)
+        assertEquals(FinishResult.Ok, r.finish(fixes(far(15.0)), T0 + 3000))
+        assertEquals(SessionState.FINISHED, r.currentState)
+    }
+
+    @Test
     fun `距 Home 500m 结束被拒并可强制`() {
         val r = started()
         r.pause(fixes(far(100.0)), T0 + 1000)

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,10 +36,16 @@ private val BrandCardBorder = Color(0x33FFFFFF) // 白 20%
 /** 省电白名单引导（四层防杀之第三层：国产 ROM 决定性动作；首次开始拜年前展示一次）
  * 视觉参照 uxpilot-export/4-baibai - Guide.html
  *
- * 点任意厂商卡片 → 直达该品牌系统设置页（WhitelistDeepLink，多级兜底）。
+ * 点任意厂商卡片 → 直达该品牌系统设置页（多级兜底）；自动识别机型并把你的品牌卡片置顶。
  */
 @Composable
-fun WhitelistGuideScreen(onDone: () -> Unit, onDeepLink: (Brand) -> Unit) {
+fun WhitelistGuideScreen(onDone: () -> Unit, onDeepLink: (Brand) -> Unit, detected: Brand? = null) {
+    // 识别到机型 → 该品牌卡片置顶并打「你的机型」标
+    val brands = remember(detected) {
+        val all = listOf(Brand.XIAOMI, Brand.HUAWEI, Brand.OPPO, Brand.VIVO, Brand.SAMSUNG)
+        if (detected != null) listOf(detected) + all.filter { it != detected } else all
+    }
+
     BaibaiPage {
         Column(Modifier.fillMaxSize()) {
             // 上部可滚动区
@@ -68,7 +75,11 @@ fun WhitelistGuideScreen(onDone: () -> Unit, onDeepLink: (Brand) -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "点下方自己手机的卡片，可直接跳转对应设置页；跳不过去就按卡片上的路径手动设置。",
+                    if (detected != null) {
+                        "检测到你的机型：" + detected.label + "（置顶）。点卡片直达对应设置页；跳不过去会弹系统授权框，路径也已复制到剪贴板。"
+                    } else {
+                        "点下方自己手机的卡片，直达对应设置页；跳不过去会弹系统授权框，路径也已复制到剪贴板。"
+                    },
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     lineHeight = 18.sp,
@@ -77,37 +88,16 @@ fun WhitelistGuideScreen(onDone: () -> Unit, onDeepLink: (Brand) -> Unit) {
 
                 Spacer(Modifier.height(24.dp))
 
-                // §7.2：五张厂商卡片（整卡可点 → 直达系统设置）
-                BrandCard(
-                    brand = Brand.XIAOMI,
-                    lines = listOf("设置 → 应用设置 → 拜拜 → 省电策略 → 无限制；并开启「自启动」"),
-                    onDeepLink = onDeepLink,
-                )
+                // §7.2：五张厂商卡片（整卡可点 → 直达系统设置；识别到的品牌置顶）
+                brands.forEach { brand ->
+                    BrandCard(
+                        brand = brand,
+                        isMine = brand == detected,
+                        onDeepLink = onDeepLink,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
                 Spacer(Modifier.height(12.dp))
-                BrandCard(
-                    brand = Brand.HUAWEI,
-                    lines = listOf("设置 → 应用 → 应用启动管理 → 拜拜 → 手动管理 → 允许自启动/关联启动/后台活动"),
-                    onDeepLink = onDeepLink,
-                )
-                Spacer(Modifier.height(12.dp))
-                BrandCard(
-                    brand = Brand.OPPO,
-                    lines = listOf("设置 → 电池 → 更多设置 → 拜拜 → 允许后台运行；应用管理里开自启动"),
-                    onDeepLink = onDeepLink,
-                )
-                Spacer(Modifier.height(12.dp))
-                BrandCard(
-                    brand = Brand.VIVO,
-                    lines = listOf("i管家 → 电池 → 后台耗电管理 → 拜拜 → 允许后台高耗电"),
-                    onDeepLink = onDeepLink,
-                )
-                Spacer(Modifier.height(12.dp))
-                BrandCard(
-                    brand = Brand.SAMSUNG,
-                    lines = listOf("设置 → 电池 → 后台使用限制 → 拜拜 → 不休眠"),
-                    onDeepLink = onDeepLink,
-                )
-                Spacer(Modifier.height(24.dp))
             }
 
             // 底部固定：64dp 红色主按钮（拇指热区，永不挤出屏幕）
@@ -137,13 +127,17 @@ fun WhitelistGuideScreen(onDone: () -> Unit, onDeepLink: (Brand) -> Unit) {
 }
 
 @Composable
-private fun BrandCard(brand: Brand, lines: List<String>, onDeepLink: (Brand) -> Unit) {
+private fun BrandCard(brand: Brand, isMine: Boolean, onDeepLink: (Brand) -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .background(BrandCardBg, RoundedCornerShape(RoundedBrand))
-            .border(1.dp, BrandCardBorder, RoundedCornerShape(RoundedBrand))
+            .border(
+                if (isMine) 1.5.dp else 1.dp,
+                if (isMine) BaibaiAccent2.copy(alpha = 0.8f) else BrandCardBorder,
+                RoundedCornerShape(RoundedBrand),
+            )
             .clickable { onDeepLink(brand) }
             .padding(16.dp),
     ) {
@@ -152,25 +146,26 @@ private fun BrandCard(brand: Brand, lines: List<String>, onDeepLink: (Brand) -> 
                 Text(brand.label, fontSize = 14.sp, fontWeight = FontWeight.Black, color = BaibaiAccent)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "去设置",
+                    if (isMine) "你的机型" else "去设置",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Black,
-                    color = BaibaiAccent.copy(alpha = 0.85f),
+                    color = if (isMine) Color.White else BaibaiAccent.copy(alpha = 0.85f),
                     modifier = Modifier
-                        .background(BaibaiAccent.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                        .background(
+                            if (isMine) BaibaiAccent2 else BaibaiAccent.copy(alpha = 0.12f),
+                            RoundedCornerShape(999.dp),
+                        )
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                 )
             }
-            lines.forEachIndexed { i, line ->
-                Text(
-                    line,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BaibaiInk.copy(alpha = 0.4f),
-                    lineHeight = 16.sp,
-                    modifier = Modifier.padding(top = if (i == 0) 4.dp else 2.dp),
-                )
-            }
+            Text(
+                brand.manualPath,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = BaibaiInk.copy(alpha = 0.4f),
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
         Icon(
             Icons.Filled.KeyboardArrowRight,

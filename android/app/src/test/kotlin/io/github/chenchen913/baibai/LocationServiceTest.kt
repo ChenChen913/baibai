@@ -52,8 +52,10 @@ class LocationServiceTest {
     @Test
     fun `进程重建后静默恢复检查点（START_STICKY 分支调用的恢复逻辑）`() {
         RecorderHub.source = FakeSource(HOME)
-        // 造一个 WALKING 中的未完成检查点
+        // 造一个 WALKING 中的未完成检查点（攒 3 个 fix 定 Home）
         RecorderHub.startPressed()
+        (RecorderHub.source as FakeSource).push(HOME)
+        (RecorderHub.source as FakeSource).push(HOME)
         (RecorderHub.source as FakeSource).push(HOME)
         RecorderHub.flushNow()
         assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)

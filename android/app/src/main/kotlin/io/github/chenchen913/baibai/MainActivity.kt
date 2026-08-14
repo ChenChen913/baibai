@@ -196,8 +196,17 @@ fun AppRoot() {
             is Screen.Whitelist -> WhitelistGuideScreen(
                 onDeepLink = { brand ->
                     val opened = WhitelistDeepLink.open(ctx, brand)
-                    RecorderHub.toast("已为你打开「" + opened + "」，没跳过去就按卡片路径手动设置")
+                    // 设置路径复制到剪贴板：跳不过去也能照着做
+                    val clip = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    clip?.setPrimaryClip(
+                        android.content.ClipData.newPlainText(
+                            "拜拜省电白名单设置路径",
+                            brand.label + "：" + brand.manualPath,
+                        ),
+                    )
+                    RecorderHub.toast("已打开「" + opened + "」· 设置路径已复制到剪贴板")
                 },
+                detected = WhitelistDeepLink.detectBrand(),
                 onDone = {
                     prefs.edit().putBoolean(KEY_WHITELIST_SEEN, true).apply()
                     screen = Screen.Record
