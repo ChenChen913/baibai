@@ -44,6 +44,7 @@ private sealed interface Screen {
     data object Record : Screen
     data object Whitelist : Screen
     data object History : Screen
+    data object Plan : Screen
     data class Review(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
     data class Optimize(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
 }
@@ -113,6 +114,7 @@ fun AppRoot() {
         is Screen.Record -> RecordScreen(
             onStartRequest = { requestStart() },
             onHistory = { screen = Screen.History },
+            onPlan = { screen = Screen.Plan },
         )
 
         is Screen.Whitelist -> WhitelistGuideScreen(
@@ -121,6 +123,11 @@ fun AppRoot() {
                 screen = Screen.Record
                 requestStart()
             },
+        )
+
+        is Screen.Plan -> PlanScreen(
+            year = java.time.LocalDate.now().year,
+            onBack = { screen = Screen.Record },
         )
 
         is Screen.History -> HistoryScreen(

@@ -293,6 +293,65 @@ fun ReviewScreen(
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+
+        // ---------- 漏访检查（今年清单，F-9） ----------
+        Text("漏访检查（今年清单）", fontWeight = FontWeight.ExtraBold, color = BaibaiInk)
+        val plan = remember(s) { RecorderHub.store.loadPlan(s.year) }
+        if (plan == null) {
+            Text("今年还没有清单。回记录页 →「清单」先导入/添加。", fontSize = 13.sp, color = BaibaiInk.copy(alpha = 0.6f))
+        } else if (plan.items.isEmpty()) {
+            Text("今年清单是空的。", fontSize = 13.sp, color = BaibaiInk.copy(alpha = 0.6f))
+        } else {
+            val res = remember(s, plan) { io.github.chenchen913.baibai.core.plan.PlanOps.matchPlan(s, plan) }
+            if (res.missing.isEmpty()) {
+                Text("✅ 清单 ${plan.items.size} 户全部到访，没有漏拜！", fontSize = 13.sp, color = BaibaiInk)
+            } else {
+                Text("⚠️ 疑似漏访 ${res.missing.size} 户：", fontSize = 13.sp, color = Color(0xFFB3261E), fontWeight = FontWeight.Bold)
+                res.missing.forEach { it ->
+                    Text(
+                        "❌ ${it.name.ifEmpty { "(未命名)" }} 没去！" + if (it.pos == null) "（无坐标·手动核对）" else "",
+                        fontSize = 13.sp,
+                        color = Color(0xFFB3261E),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // ---------- 套用去年的户名（D17） ----------
+        Text("套用去年的户名", fontWeight = FontWeight.ExtraBold, color = BaibaiInk)
+        val prevSession = remember(s) {
+            RecorderHub.store.listSessions()
+                .filter { it.year < s.year }
+                .maxByOrNull { it.createdAt }
+        }
+        if (prevSession == null || prevSession.nodes.isEmpty()) {
+            Text("没有往年记录可套用。", fontSize = 13.sp, color = BaibaiInk.copy(alpha = 0.6f))
+        } else {
+            Text("点击候选名立即套用到该户（按距离排序，取前 3）：", fontSize = 12.sp, color = BaibaiInk.copy(alpha = 0.6f))
+            s.nodes.forEach { n ->
+                val cands = io.github.chenchen913.baibai.core.plan.PlanOps.nameCandidates(n.pos, prevSession.nodes, 3)
+                if (cands.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 3.dp)) {
+                        Text(n.name.ifEmpty { "户${n.autoNo}" }, fontWeight = FontWeight.Bold, color = BaibaiInk)
+                        Spacer(Modifier.weight(0.2f))
+                        cands.forEach { c ->
+                            OutlinedButton(
+                                onClick = { mutate(Review.renameNode(s, n.id, c.name)) },
+                                modifier = Modifier.padding(start = 4.dp),
+                            ) {
+                                Text("${c.name}（${c.distM.toInt()}m）", fontSize = 11.sp, color = BaibaiInk)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(20.dp))
     }
 }
