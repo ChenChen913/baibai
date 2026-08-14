@@ -173,9 +173,12 @@ fun PlanScreen(year: Int, onBack: () -> Unit) {
                                 modifier = Modifier
                                     .height(48.dp)
                                     .padding(horizontal = 12.dp)
-                                    .background(
-                                        if (changed) baibaiChipGradient() else BaibaiInk.copy(alpha = 0.1f),
-                                        RoundedCornerShape(12.dp),
+                                    .then(
+                                        if (changed) {
+                                            Modifier.background(baibaiChipGradient(), RoundedCornerShape(12.dp))
+                                        } else {
+                                            Modifier.background(BaibaiInk.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                                        },
                                     )
                                     .clickable(enabled = changed) {
                                         val items = plan.items.toMutableList()

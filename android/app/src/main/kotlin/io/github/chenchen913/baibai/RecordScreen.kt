@@ -122,7 +122,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(BaibaiGlass, RoundedMainCard)
+                    .background(BaibaiGlass, RoundedCornerShape(RoundedMainCard))
                     .padding(horizontal = 24.dp, vertical = 28.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -218,7 +218,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(BaibaiGlass, RoundedMainCard),
+                    .background(BaibaiGlass, RoundedCornerShape(RoundedMainCard)),
             ) {
                 Column {
                     Row(

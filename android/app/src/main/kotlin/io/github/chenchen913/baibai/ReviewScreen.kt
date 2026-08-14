@@ -320,9 +320,12 @@ fun ReviewScreen(
                                 modifier = Modifier
                                     .width(96.dp)
                                     .height(48.dp)
-                                    .background(
-                                        if (nameText != n.name) baibaiChipGradient() else BaibaiInk.copy(alpha = 0.1f),
-                                        RoundedCornerShape(12.dp),
+                                    .then(
+                                        if (nameText != n.name) {
+                                            Modifier.background(baibaiChipGradient(), RoundedCornerShape(12.dp))
+                                        } else {
+                                            Modifier.background(BaibaiInk.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                                        },
                                     )
                                     .clickable(enabled = nameText != n.name) { mutate(Review.renameNode(s, n.id, nameText.trim())) },
                                 contentAlignment = Alignment.Center,
@@ -380,7 +383,13 @@ fun ReviewScreen(
                         val isSel = n.id in selected
                         Box(
                             modifier = Modifier
-                                .background(if (isSel) baibaiChipGradient() else ChipIdleBg, RoundedCornerShape(999.dp))
+                                .then(
+                                    if (isSel) {
+                                        Modifier.background(baibaiChipGradient(), RoundedCornerShape(999.dp))
+                                    } else {
+                                        Modifier.background(ChipIdleBg, RoundedCornerShape(999.dp))
+                                    },
+                                )
                                 .clickable {
                                     if (isSel) selected.remove(n.id)
                                     else {

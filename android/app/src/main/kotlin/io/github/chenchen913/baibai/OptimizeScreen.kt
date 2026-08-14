@@ -301,9 +301,12 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
                         val active = mode == tab
                         Box(
                             modifier = Modifier
-                                .background(
-                                    if (active) baibaiChipGradient() else ChipIdleBg,
-                                    RoundedCornerShape(4.dp),
+                                .then(
+                                    if (active) {
+                                        Modifier.background(baibaiChipGradient(), RoundedCornerShape(4.dp))
+                                    } else {
+                                        Modifier.background(ChipIdleBg, RoundedCornerShape(4.dp))
+                                    },
                                 )
                                 .clickable {
                                     tab = mode
