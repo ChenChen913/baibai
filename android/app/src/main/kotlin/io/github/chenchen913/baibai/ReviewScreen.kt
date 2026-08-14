@@ -340,8 +340,9 @@ fun ReviewScreen(
                         }
                         val visits = s.visits.filter { it.nodeId == n.id }
                         if (visits.size > 1) {
-                            Row(
+                            FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.padding(start = 30.dp),
                             ) {
                                 visits.forEachIndexed { idx, v ->

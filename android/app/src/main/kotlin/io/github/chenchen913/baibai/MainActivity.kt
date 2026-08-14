@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -20,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -111,47 +115,49 @@ fun AppRoot() {
         RecorderHub.startPressed()
     }
 
-    when (screen) {
-        is Screen.Record -> RecordScreen(
-            onStartRequest = { requestStart() },
-            onHistory = { screen = Screen.History },
-            onPlan = { screen = Screen.Plan },
-        )
-
-        is Screen.Whitelist -> WhitelistGuideScreen(
-            onDone = {
-                prefs.edit().putBoolean(KEY_WHITELIST_SEEN, true).apply()
-                screen = Screen.Record
-                requestStart()
-            },
-        )
-
-        is Screen.Plan -> PlanScreen(
-            year = java.time.LocalDate.now().year,
-            onBack = { screen = Screen.Record },
-        )
-
-        is Screen.History -> HistoryScreen(
-            onBack = { screen = Screen.Record },
-            onOpen = { s -> screen = Screen.Review(s) },
-        )
-
-        is Screen.Review -> {
-            val reviewScreen = screen as Screen.Review
-            ReviewScreen(
-                initial = reviewScreen.session,
-                onBack = { screen = Screen.History },
-                onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
-                onOptimize = { screen = Screen.Optimize(reviewScreen.session) },
+    Box(Modifier.fillMaxSize()) {
+        when (screen) {
+            is Screen.Record -> RecordScreen(
+                onStartRequest = { requestStart() },
+                onHistory = { screen = Screen.History },
+                onPlan = { screen = Screen.Plan },
             )
-        }
 
-        is Screen.Optimize -> {
-            val optimizeScreen = screen as Screen.Optimize
-            OptimizeScreen(
-                session = optimizeScreen.session,
-                onBack = { screen = Screen.Review(optimizeScreen.session) },
+            is Screen.Whitelist -> WhitelistGuideScreen(
+                onDone = {
+                    prefs.edit().putBoolean(KEY_WHITELIST_SEEN, true).apply()
+                    screen = Screen.Record
+                    requestStart()
+                },
             )
+
+            is Screen.Plan -> PlanScreen(
+                year = java.time.LocalDate.now().year,
+                onBack = { screen = Screen.Record },
+            )
+
+            is Screen.History -> HistoryScreen(
+                onBack = { screen = Screen.Record },
+                onOpen = { s -> screen = Screen.Review(s) },
+            )
+
+            is Screen.Review -> {
+                val reviewScreen = screen as Screen.Review
+                ReviewScreen(
+                    initial = reviewScreen.session,
+                    onBack = { screen = Screen.History },
+                    onSave = { s2 -> runCatching { RecorderHub.store.saveSession(s2) } },
+                    onOptimize = { screen = Screen.Optimize(reviewScreen.session) },
+                )
+            }
+
+            is Screen.Optimize -> {
+                val optimizeScreen = screen as Screen.Optimize
+                OptimizeScreen(
+                    session = optimizeScreen.session,
+                    onBack = { screen = Screen.Review(optimizeScreen.session) },
+                )
+            }
         }
     }
 
@@ -190,5 +196,11 @@ fun AppRoot() {
         )
     }
 
-    SnackbarHost(hostState = snackbar, modifier = Modifier)
+    // 轻提示：底部居中、位于导航栏/手势条之上
+    SnackbarHost(
+        hostState = snackbar,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding(),
+    )
 }
