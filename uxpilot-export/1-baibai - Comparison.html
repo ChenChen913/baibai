@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三线对比 - 拜拜</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(180deg, #FFF8EE 0%, #FFE9D4 100%);
+            color: #5A3A2A;
+            min-height: 100vh;
+        }
+
+        .score-card {
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            padding: 12px;
+        }
+
+        .canvas-bg {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 248, 238, 0.8) 100%);
+        }
+
+        /* 轨迹动画 */
+        .path-actual { stroke: #C8402F; stroke-width: 3; fill: none; opacity: 0.3; }
+        .path-optimal { stroke: #E8A23D; stroke-width: 3; fill: none; stroke-dasharray: 6 4; }
+        .path-flight { stroke: #E8A23D; stroke-width: 2; fill: none; opacity: 0.8; }
+
+        .btn-morph {
+            background: linear-gradient(135deg, #E8A23D 0%, #D49130 100%);
+            box-shadow: 0 4px 15px rgba(232, 162, 61, 0.3);
+        }
+
+        .chip-label {
+            font-size: 9px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 900;
+        }
+    </style>
+</head>
+<body class="p-4 flex flex-col gap-4">
+
+    <!-- 顶栏 -->
+    <header class="flex justify-between items-center">
+        <div class="flex items-center gap-3">
+            <button class="w-10 h-10 flex items-center justify-center rounded-xl bg-white/50 text-[#5A3A2A]">
+                <i class="fa-solid fa-arrow-left"></i>
+            </button>
+            <h1 class="font-black text-lg">2024-02-10 · 三线对比</h1>
+        </div>
+    </header>
+
+    <!-- 成绩单四卡 -->
+    <div class="grid grid-cols-2 gap-3">
+        <div class="score-card">
+            <div class="flex items-center gap-1.5 mb-2">
+                <i class="fa-solid fa-person-walking text-[#C8402F] text-[10px]"></i>
+                <span class="text-[11px] font-black opacity-60">今年实走</span>
+            </div>
+            <p class="text-base font-black text-[#C8402F]">4.32 <span class="text-[9px]">km</span></p>
+            <p class="text-[9px] font-bold opacity-40 mt-1">骑行 2.1km · 45分12秒</p>
+        </div>
+        <div class="score-card">
+            <div class="flex items-center gap-1.5 mb-2">
+                <i class="fa-solid fa-brain text-[#C8402F] text-[10px]"></i>
+                <span class="text-[11px] font-black opacity-60">时间最优(理论)</span>
+            </div>
+            <p class="text-base font-black text-[#C8402F]">32 <span class="text-[9px]">分 15 秒</span></p>
+            <p class="text-[9px] font-bold text-[#C8402F] mt-1">比实走省 28%</p>
+        </div>
+        <div class="score-card">
+            <div class="flex items-center gap-1.5 mb-2">
+                <i class="fa-solid fa-ruler text-[#C8402F] text-[10px]"></i>
+                <span class="text-[11px] font-black opacity-60">距离最优</span>
+            </div>
+            <p class="text-base font-black text-[#C8402F]">3.85 <span class="text-[9px]">km</span></p>
+            <p class="text-[9px] font-bold text-orange-500 mt-1">省 11%</p>
+        </div>
+        <div class="score-card">
+            <div class="flex items-center gap-1.5 mb-2">
+                <i class="fa-solid fa-paper-plane text-[#C8402F] text-[10px]"></i>
+                <span class="text-[11px] font-black opacity-60">如果能飞</span>
+            </div>
+            <p class="text-base font-black text-[#C8402F]">2.10 <span class="text-[9px]">km</span></p>
+            <p class="text-[9px] font-bold text-[#E8A23D] mt-1">少走 51%</p>
+        </div>
+    </div>
+
+    <!-- 画布卡 -->
+    <section class="canvas-bg flex-1 min-h-[360px] rounded-[32px] border border-white/50 shadow-inner relative overflow-hidden">
+        <svg viewBox="0 0 200 240" class="w-full h-full p-6">
+            <!-- 背景实走轨迹 (淡红) -->
+            <path d="M40,200 L60,180 L100,160 L140,180 L160,120 L120,80 L80,100 L40,60" class="path-actual" />
+            
+            <!-- 模式切换轨迹 (虚线为估算) -->
+            <path d="M40,200 L160,120 L40,60" class="path-optimal" id="mode-path" />
+
+            <!-- 节点与序号 -->
+            <g transform="translate(40,200)">
+                <circle r="10" fill="#E8A23D" />
+                <i class="fa-solid fa-house text-white text-[8px]" style="transform: translate(-3px, -4px);"></i>
+            </g>
+            
+            <g transform="translate(160,120)">
+                <circle r="8" fill="white" stroke="#C8402F" stroke-width="2" />
+                <text y="3" text-anchor="middle" font-size="6" font-weight="900" fill="#C8402F">1</text>
+            </g>
+
+            <g transform="translate(40,60)">
+                <circle r="8" fill="white" stroke="#C8402F" stroke-width="2" />
+                <text y="3" text-anchor="middle" font-size="6" font-weight="900" fill="#C8402F">2</text>
+            </g>
+        </svg>
+
+        <!-- 标签切换 -->
+        <div class="absolute top-4 right-4 flex flex-col gap-2">
+            <div class="chip-label bg-[#C8402F] text-white">走路时间最优</div>
+            <div class="chip-label bg-white/60 text-[#5A3A2A]/40">走路距离最优</div>
+            <div class="chip-label bg-white/60 text-[#5A3A2A]/40">飞行最优</div>
+        </div>
+
+        <!-- 说明行 -->
+        <div class="absolute bottom-4 left-0 right-0 px-6">
+            <p class="text-[9px] font-medium opacity-40 text-center">飞行视角：直线距离，纯几何幻想</p>
+        </div>
+    </section>
+
+    <!-- 按钮行 -->
+    <footer class="flex items-center gap-3 mb-4">
+        <button class="flex-1 h-[56px] rounded-2xl bg-[#C8402F] text-white font-black text-sm shadow-lg">
+            推演
+        </button>
+        <button class="flex-1 h-[56px] rounded-2xl btn-morph text-white font-black text-sm shadow-lg flex items-center justify-center gap-2">
+            <i class="fa-solid fa-star"></i>
+            压轴动画
+        </button>
+        <button class="w-[56px] h-[56px] rounded-2xl bg-white/50 text-[#5A3A2A]/20 flex items-center justify-center">
+            <i class="fa-solid fa-rotate-right"></i>
+        </button>
+    </footer>
+
+</body>
+</html>

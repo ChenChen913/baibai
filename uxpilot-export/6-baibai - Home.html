@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>记录中 - 拜拜</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(180deg, #FFF5E9 0%, #FFDFBE 100%);
+            color: #5A3A2A;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-card {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(15px);
+            border-radius: 40px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.02);
+        }
+
+        .status-pill {
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(90, 58, 42, 0.05);
+        }
+
+        .action-button {
+            background: linear-gradient(180deg, #CE4131 0%, #B33425 100%);
+            box-shadow: 0 12px 24px rgba(200, 64, 47, 0.25);
+        }
+
+        .pattern-bg {
+            background-image: radial-gradient(#5A3A2A 0.5px, transparent 0.5px);
+            background-size: 16px 16px;
+            opacity: 0.03;
+        }
+
+        .leaflet-container {
+            background: #f4f1ea;
+        }
+
+        /* Custom scrollbar for some regions if needed */
+        ::-webkit-scrollbar {
+            width: 0px;
+        }
+
+        .badge-newyear {
+            background: rgba(232, 162, 61, 0.1);
+            border: 1px solid rgba(232, 162, 61, 0.2);
+            color: #E8A23D;
+        }
+    </style>
+</head>
+<body class="p-6">
+
+    <!-- 1. Header -->
+    <header id="header" class="flex justify-between items-center mb-8">
+        <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-[#C8402F]/10 rounded-full flex items-center justify-center text-[#C8402F]">
+                <i class="fa-solid fa-fan text-2xl"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl font-black leading-none">拜拜</h1>
+                <p class="text-[11px] font-bold opacity-40 mt-1">拜年轨迹复盘</p>
+            </div>
+        </div>
+        <div class="badge-newyear px-4 py-2 rounded-full text-xs font-black">
+            大年初一
+        </div>
+    </header>
+
+    <!-- 2. Status Card -->
+    <section id="status-card" class="main-card p-8 mb-6 relative overflow-hidden flex flex-col items-center">
+        <!-- Decoration -->
+        <div class="absolute -top-4 -right-4 opacity-5">
+            <i class="fa-solid fa-sun text-8xl"></i>
+        </div>
+
+        <h2 class="text-4xl font-black mb-4">记录中</h2>
+
+        <div class="status-pill px-4 py-1.5 rounded-full flex items-center gap-2 mb-8">
+            <div class="w-2 h-2 bg-[#E8A23D] rounded-full"></div>
+            <span class="text-xs font-bold text-[#5A3A2A]/60">已定位 · 精度约 ±4 米</span>
+        </div>
+
+        <div class="w-full flex items-center justify-center">
+            <div class="flex-1 text-center">
+                <p class="text-[44px] font-black text-[#C8402F] leading-none">15</p>
+                <p class="text-[12px] font-bold text-[#5A3A2A]/40 mt-2 tracking-wide">拜访户数</p>
+            </div>
+            <div class="w-[1.5px] h-12 bg-[#5A3A2A]/5 mx-2"></div>
+            <div class="flex-1 text-center">
+                <p class="text-[44px] font-black tabular-nums leading-none tracking-tight">03:15:42</p>
+                <p class="text-[12px] font-bold text-[#5A3A2A]/40 mt-2 tracking-wide">本次用时</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. Real-time Map Card -->
+    <section id="map-container" class="main-card overflow-hidden mb-8">
+        <div class="px-6 py-4 flex justify-between items-center bg-white/20">
+            <h3 class="text-sm font-black">实时轨迹</h3>
+            <button class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#5A3A2A] shadow-sm">
+                <i class="fa-solid fa-chevron-up text-[10px]"></i>
+            </button>
+        </div>
+        <div id="map"></div>
+        <div class="px-6 py-2 bg-white/20 text-[9px] font-medium opacity-40 text-right">
+            © OpenStreetMap / 高德地图
+        </div>
+    </section>
+
+    <!-- 4. Mode Toggle & Action Buttons -->
+    <section class="mt-auto flex flex-col items-center gap-6">
+        <!-- Mode Toggle Capsule -->
+        <div class="bg-white/80 backdrop-blur rounded-full p-1.5 flex items-center gap-4 shadow-sm">
+            <button class="bg-[#C8402F] text-white px-4 py-2 rounded-full flex items-center gap-2 text-xs font-black">
+                <i class="fa-solid fa-person-walking"></i>
+                <span>走路</span>
+            </button>
+            <button class="px-2 text-[#5A3A2A]/40">
+                <i class="fa-solid fa-bicycle text-lg"></i>
+            </button>
+            <div class="w-px h-4 bg-[#5A3A2A]/10"></div>
+            <button class="px-2 text-[#5A3A2A]/40">
+                <i class="fa-solid fa-circle-check text-lg"></i>
+            </button>
+            <button class="px-2 text-[#5A3A2A]/40">
+                <i class="fa-solid fa-clock text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Main Action Button -->
+        <button class="action-button w-full h-[72px] rounded-full text-white font-black text-xl flex items-center justify-center gap-3">
+            <i class="fa-solid fa-pause-circle text-2xl"></i>
+            <span>到一户了 · 暂停</span>
+        </button>
+
+        <!-- Secondary Actions -->
+        <div class="flex items-center gap-8 mb-4">
+            <button class="flex items-center gap-2 text-sm font-bold text-[#C8402F]">
+                <i class="fa-solid fa-stop-circle"></i>
+                <span>结束拜年</span>
+            </button>
+            <div class="w-1.5 h-1.5 bg-[#5A3A2A]/10 rounded-full"></div>
+            <button class="flex items-center gap-2 text-sm font-bold text-[#5A3A2A]/60">
+                <i class="fa-solid fa-rotate-left"></i>
+                <span>撤销</span>
+            </button>
+        </div>
+    </section>
+
+    <script>
+        window.addEventListener('load', function() {
+            // Initialize Leaflet Map with a muted "vintage" look if possible
+            const map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false
+            }).setView([31.2304, 121.4737], 15);
+
+            // Use a specific tile layer or filter to match the image style
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(map);
+
+            // Mock Path
+            const latlngs = [
+                [31.235, 121.470],
+                [31.233, 121.472],
+                [31.231, 121.475],
+                [31.229, 121.474],
+                [31.228, 121.478]
+            ];
+
+            const polyline = L.polyline(latlngs, {
+                color: '#C8402F',
+                weight: 4,
+                opacity: 0.8
+            }).addTo(map);
+
+            // Markers for nodes (1, 2, 3)
+            const createNodeIcon = (number) => L.divIcon({
+                html: `<div class="w-6 h-6 bg-white border-2 border-[#C8402F] rounded-full flex items-center justify-center text-[#C8402F] text-[10px] font-black">${number}</div>`,
+                className: '',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            L.marker([31.233, 121.472], {icon: createNodeIcon(1)}).addTo(map);
+            L.marker([31.231, 121.475], {icon: createNodeIcon(2)}).addTo(map);
+            L.marker([31.229, 121.474], {icon: createNodeIcon(3)}).addTo(map);
+
+            // Current position marker
+            const currentIcon = L.divIcon({
+                html: `<div class="w-4 h-4 bg-[#C8402F] border-2 border-white rounded-full shadow-lg"></div><div class="absolute -inset-2 bg-[#C8402F]/20 rounded-full animate-ping"></div>`,
+                className: '',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+            });
+            L.marker([31.228, 121.478], {icon: currentIcon}).addTo(map);
+
+            map.fitBounds(polyline.getBounds(), {padding: [40, 40]});
+        });
+    </script>
+</body>
+</html>

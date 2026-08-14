@@ -4,7 +4,10 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,14 +15,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,10 +38,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import io.github.chenchen913.baibai.core.model.SessionData
+import io.github.chenchen913.baibai.core.optimize.Optimize
 import java.io.File
 import java.time.LocalDate
 
-/** 历史列表页（A-M2）：会话列表 → 回顾页；A-M5：导出/导入（与网页版互通） */
+private val GlassCardBg = Color(0x80FFFFFF) // 白 50%
+private val GlassCardBorder = Color(0x4DFFFFFF) // 白 30%
+
+/** 历史列表页（A-M2）：会话列表 → 回顾页；A-M5：导出/导入（与网页版互通）
+ * 视觉参照 uxpilot-export/2-baibai - History.html */
 @Composable
 fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
     val ctx = LocalContext.current
@@ -75,69 +83,95 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BaibaiBg)
-            .padding(20.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = onBack, colors = ButtonDefaults.buttonColors(containerColor = Color(0xAAFFFFFF))) {
-                Text("← 返回", color = BaibaiInk)
+    BaibaiPage {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+        ) {
+            // 顶栏
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BackButton(onClick = onBack)
+                Spacer(Modifier.width(12.dp))
+                Text("历史记录", fontSize = 20.sp, fontWeight = FontWeight.Black, color = BaibaiInk)
             }
-            Spacer(Modifier.weight(1f))
-            Text("历史记录", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = BaibaiInk)
-        }
 
-        Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(24.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { doExport() },
-                colors = ButtonDefaults.buttonColors(containerColor = BaibaiAccent),
-            ) { Text("导出 JSON") }
-            OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }) {
-                Text("导入 JSON", color = BaibaiInk)
+            // 导出（红实心）/ 导入（红描边）
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .background(baibaiPrimaryGradient(), RoundedCornerShape(12.dp))
+                        .clickable { doExport() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("导出 JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .background(Color.Transparent, RoundedCornerShape(12.dp))
+                        .border(1.dp, BaibaiAccent, RoundedCornerShape(12.dp))
+                        .clickable { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("导入 JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BaibaiAccent)
+                }
             }
-        }
-        Text(
-            "导出/导入与网页版同一格式：安卓记录 → 电脑复盘，或反之。",
-            fontSize = 11.sp,
-            color = BaibaiInk.copy(alpha = 0.55f),
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        message?.let {
-            Text(it, fontSize = 13.sp, color = BaibaiAccent, modifier = Modifier.padding(top = 6.dp))
-        }
+            Text(
+                "导出/导入与网页版同一格式：安卓记录 → 电脑复盘，或反之。",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = BaibaiInk.copy(alpha = 0.4f),
+                modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+            )
+            message?.let {
+                Text(it, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = BaibaiAccent, modifier = Modifier.padding(top = 8.dp, start = 4.dp))
+            }
 
-        Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(24.dp))
 
-        if (sessions.value.isEmpty()) {
-            Text("还没有记录。大年初一，出发！", color = BaibaiInk.copy(alpha = 0.6f))
-        } else {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                sessions.value.forEach { s ->
-                    val stat = runCatching {
-                        val routes = io.github.chenchen913.baibai.core.optimize.Optimize.optimizeSession(s)
-                        val c = io.github.chenchen913.baibai.core.optimize.Optimize.scorecard(s, routes)
-                        "${s.nodes.size} 户 · ${"%.2f".format(c.actualDistM / 1000)} km · 绕路率 ${c.savingsTimePct.toInt()}%"
-                    }.getOrElse { "${s.nodes.size} 户" }
-                    Card(
-                        onClick = { onOpen(s) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xAAFFFFFF)),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                    ) {
-                        Column(Modifier.padding(14.dp)) {
-                            Text("📅 ${s.date}", fontWeight = FontWeight.Bold, color = BaibaiInk)
-                            Text(
-                                stat,
-                                fontSize = 12.sp,
-                                color = BaibaiInk.copy(alpha = 0.6f),
+            if (sessions.value.isEmpty()) {
+                Text("还没有记录。大年初一，出发！", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BaibaiInk.copy(alpha = 0.6f))
+            } else {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    sessions.value.forEach { s ->
+                        val stat = runCatching {
+                            val routes = Optimize.optimizeSession(s)
+                            val c = Optimize.scorecard(s, routes)
+                            "${s.nodes.size} 户 · ${"%.2f".format(c.actualDistM / 1000)} km · 绕路率 ${c.savingsTimePct.toInt()}%"
+                        }.getOrElse { "${s.nodes.size} 户" }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(GlassCardBg, RoundedCornerShape(RoundedGlass))
+                                .border(1.dp, GlassCardBorder, RoundedCornerShape(RoundedGlass))
+                                .clickable { onOpen(s) }
+                                .padding(20.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(s.date, fontSize = 16.sp, fontWeight = FontWeight.Black, color = BaibaiInk)
+                                Text(
+                                    stat,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BaibaiInk.copy(alpha = 0.6f),
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
+                            Icon(
+                                Icons.Filled.KeyboardArrowRight,
+                                contentDescription = "打开",
+                                tint = BaibaiInk.copy(alpha = 0.2f),
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                     }

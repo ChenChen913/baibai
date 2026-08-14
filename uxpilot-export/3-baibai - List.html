@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>清单管理 - 拜拜</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(180deg, #FFF8EE 0%, #FFE9D4 100%);
+            color: #5A3A2A;
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+        }
+        .notification-mock {
+            background: #2D2D2D;
+            color: white;
+            border-radius: 16px;
+            padding: 12px 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body class="p-4 flex flex-col gap-6">
+
+    <!-- 系统通知预览 (7.7 要求) -->
+    <section>
+        <p class="text-[10px] font-black opacity-30 uppercase tracking-widest mb-3">系统常驻通知预览</p>
+        <div class="notification-mock flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center border border-white/10">
+                    <i class="fa-solid fa-location-dot text-[10px]"></i>
+                </div>
+                <div>
+                    <h4 class="text-[11px] font-black">拜拜 · 拜年记录</h4>
+                    <p class="text-[10px] opacity-60">记录中 · 已拜访 5 户</p>
+                </div>
+            </div>
+            <i class="fa-solid fa-chevron-down text-[10px] opacity-20"></i>
+        </div>
+    </section>
+
+    <!-- 顶栏 -->
+    <header class="flex items-center gap-3">
+        <button class="w-10 h-10 flex items-center justify-center rounded-xl bg-white/50"><i class="fa-solid fa-arrow-left"></i></button>
+        <h1 class="font-black text-xl">2024 年拜年清单</h1>
+    </header>
+
+    <div class="glass-card p-4">
+        <p class="text-xs leading-relaxed font-medium opacity-60">出门前看一眼，拜年时照常只按「暂停」，回来系统自动对比漏了谁。</p>
+    </div>
+
+    <div class="flex items-center gap-2">
+        <button class="flex-1 py-3 rounded-xl bg-[#C8402F] text-white font-black text-xs">从去年导入</button>
+        <button class="w-12 h-12 flex items-center justify-center rounded-xl border border-[#C8402F] text-[#C8402F]"><i class="fa-solid fa-plus text-sm"></i></button>
+    </div>
+
+    <!-- 条目行 -->
+    <div class="space-y-3 flex-1 overflow-y-auto">
+        <div class="flex items-center gap-3 bg-white/30 p-3 rounded-2xl border border-white/20">
+            <span class="text-xs font-black opacity-20 tabular-nums">01</span>
+            <input type="text" value="大伯家" class="flex-1 bg-transparent text-sm font-bold focus:outline-none">
+            <button class="text-[10px] font-bold opacity-20 px-3 py-1 rounded-lg">改名</button>
+            <button class="text-[10px] font-bold opacity-20 px-2 py-1"><i class="fa-solid fa-trash-can"></i></button>
+        </div>
+        <div class="flex items-center gap-3 bg-white/30 p-3 rounded-2xl border border-white/20">
+            <span class="text-xs font-black opacity-20 tabular-nums">02</span>
+            <input type="text" value="三姑家" class="flex-1 bg-transparent text-sm font-bold focus:outline-none">
+            <p class="text-[9px] font-medium text-[#C8402F]/40 mr-2">无位置·手动核对</p>
+            <button class="text-[10px] font-bold opacity-20 px-2 py-1"><i class="fa-solid fa-trash-can"></i></button>
+        </div>
+    </div>
+
+</body>
+</html>

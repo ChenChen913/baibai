@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置引导 - 拜拜</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(180deg, #FFF8EE 0%, #FFE9D4 100%);
+            color: #5A3A2A;
+            min-height: 100vh;
+        }
+        .brand-card {
+            background: rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 16px;
+        }
+    </style>
+</head>
+<body class="p-6 flex flex-col">
+    <div class="mt-8 mb-10">
+        <h1 class="text-2xl font-black mb-3">锁屏记录前，<br>先做这一步</h1>
+        <p class="text-sm font-medium opacity-60 leading-relaxed">安卓省电策略可能杀掉后台，加入白名单后锁屏揣兜里也能记录。</p>
+    </div>
+
+    <div class="space-y-3 flex-1">
+        <div class="brand-card flex justify-between items-center">
+            <div>
+                <h3 class="font-black text-[#C8402F] text-sm">小米 / 红米</h3>
+                <p class="text-[11px] font-bold opacity-40 mt-1">设置 > 电池 > 应用智能省电 > 无限制</p>
+            </div>
+            <i class="fa-solid fa-chevron-right text-[#5A3A2A]/10 text-xs"></i>
+        </div>
+        <div class="brand-card flex justify-between items-center">
+            <div>
+                <h3 class="font-black text-[#C8402F] text-sm">华为 / 荣耀</h3>
+                <p class="text-[11px] font-bold opacity-40 mt-1">手机管家 > 应用启动管理 > 关闭自动管理</p>
+            </div>
+            <i class="fa-solid fa-chevron-right text-[#5A3A2A]/10 text-xs"></i>
+        </div>
+        <div class="brand-card flex justify-between items-center opacity-60">
+            <div>
+                <h3 class="font-black text-sm">OPPO / vivo / 三星</h3>
+                <p class="text-[11px] font-bold opacity-40 mt-1">设置 > 电池 > 允许后台高耗电运行</p>
+            </div>
+        </div>
+    </div>
+
+    <button class="w-full h-[64px] rounded-2xl bg-[#C8402F] text-white font-black text-lg shadow-xl mt-8">
+        我已完成设置，开始拜年
+    </button>
+</body>
+</html>
