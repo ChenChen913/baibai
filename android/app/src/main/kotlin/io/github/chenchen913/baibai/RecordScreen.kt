@@ -901,18 +901,22 @@ private fun DashVDivider() {
     )
 }
 
-/** 本次用时（M-5：秒级 tick 收敛在此节点，只重组这一格，不再整屏重组） */
+/** 本次用时（M-5：秒级 tick 收敛在此节点，只重组这一格，不再整屏重组）
+ *  v1.0.9 修复：旧版 tick 只在协程里自增、组合期间从未被读取——Compose 只订阅
+ *  「组合期间读取的 State」，无人读取的写入不触发重组，Text 恒停首帧值 00:00:00
+ *  （elapsedMs() 计算本身正确，故历史页有用时）。现改为每秒把 elapsed 拉进 State，
+ *  Text 参数直接读它，订阅链恢复，每秒重组刷新。 */
 @Composable
 private fun TickClock(digitSp: Float) {
-    var tick by remember { mutableLongStateOf(0L) }
+    var elapsed by remember { mutableLongStateOf(RecorderHub.elapsedMs()) }
     LaunchedEffect(Unit) {
         while (true) {
-            tick += 1
             delay(1000)
+            elapsed = RecorderHub.elapsedMs()
         }
     }
     Text(
-        fmtClock(RecorderHub.elapsedMs()),
+        fmtClock(elapsed),
         fontSize = digitSp.sp,
         fontWeight = FontWeight.Black,
         fontFamily = FontFamily.Monospace,
