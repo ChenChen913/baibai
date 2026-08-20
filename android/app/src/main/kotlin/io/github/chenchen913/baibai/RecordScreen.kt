@@ -560,7 +560,16 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
             }
             AndroidView(
                 factory = { ctx ->
+                    // 【R5 真机探针锁定根因】部分机型 WebView 在 Compose AndroidView 内被测量为 0 高
+                    // （真机徽标：容器:320x0）——Leaflet 容器 0 高 → 瓦片下载成功但永不渲染上屏。
+                    // 不依赖 Compose 测量：手动算出像素高并直接写入 WebView 的 LayoutParams。
+                    val pxH = (mapOpenHeight.value *
+                        ctx.resources.displayMetrics.density).toInt().coerceAtLeast(1)
                     WebView(ctx).apply {
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            pxH,
+                        )
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
                         webView.value = this
                         settings.javaScriptEnabled = true
@@ -591,6 +600,19 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 pageReady = true
                                 view?.evaluateJavascript("window.BaibaiMap && window.BaibaiMap.invalidateSize && window.BaibaiMap.invalidateSize()", null)
+                                // R5 兜底：部分机型首帧测量仍为 0——延迟再强制一次高度并记日志，真机可见验证
+                                view?.postDelayed(
+                                    {
+                                        view.layoutParams = android.view.ViewGroup.LayoutParams(
+                                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                            pxH,
+                                        )
+                                        view.requestLayout()
+                                        view.evaluateJavascript("window.BaibaiMap && window.BaibaiMap.invalidateSize && window.BaibaiMap.invalidateSize()", null)
+                                        Log.i(MAP_LOG, "WebView 尺寸修正：h=" + view.height + "px（目标 " + pxH + "px）")
+                                    },
+                                    600,
+                                )
                             }
 
                             // P4：页面/资源加载失败可见化

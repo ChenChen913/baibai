@@ -74,7 +74,17 @@
   /* ---------- 容器尺寸自适应（解决 Android WebView 初始 0 尺寸不加载瓦片问题） ---------- */
   function ensureSize() {
     try {
-      if (map) map.invalidateSize({ pan: false });
+      var sz = map.getSize();
+      if (sz.y <= 0 && window.innerHeight > 0) {
+        // 【R5 真机探针实证】部分机型容器被测量为 0 高（容器:320x0）——瓦片下载成功却永不上屏。
+        // 高度链 html/body/#map 全是 100%，一旦 WebView 报告 0 高就全链坍缩；
+        // 用 window.innerHeight 强制写成像素高度撑起容器，再 invalidateSize 让 Leaflet 重算。
+        var h = window.innerHeight + 'px';
+        document.documentElement.style.height = h;
+        document.body.style.height = h;
+        document.getElementById('map').style.height = h;
+      }
+      map.invalidateSize({ pan: false });
     } catch (e) {}
   }
   window.addEventListener('resize', ensureSize);
@@ -124,6 +134,9 @@
     if (!gcjActive()) return [p[0], p[1]];
     return wgs2gcj(p[0], p[1]);
   }
+  // 初始中心（潍坊）是 WGS-84，而默认街道层是 GCJ-02 瓦片——初始化即转换，
+  // 避免首屏轨迹/中心与底图偏移约 500m（定位到达后会被 center/follow 覆盖）
+  map.setView(wgs2gcj(36.71, 119.1), 14);
 
   /* ---------- 图层：普通地图（高德→OSM 兜底）+ 卫星（高德→Esri 兜底） ---------- */
   var street = null, sat = null, curLayer = 'street';

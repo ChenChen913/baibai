@@ -75,6 +75,7 @@ npm test         # vitest 单元测试（111 项）
 
 | 日期 | 事项 | 内容 |
 |---|---|---|
+| 08-20 | **真机探针锁定最终根因：容器 0 高** | v1.0.2-diag 渲染探针真机显示「容器:320x0」——该机型 WebView 在 Compose AndroidView 内被测量为 0 像素高，瓦片下载成功但永不上屏。双侧修复：Kotlin 手动写入 WebView 像素高 LayoutParams（不依赖 Compose 测量）+ JS 侧用 window.innerHeight 强制撑起容器；另修正初始中心 WGS-84/GCJ-02 未转换（首屏偏移约 500m） |
 | 08-20 | **诊断版 v1.0.2-diag：最小化变量 + 渲染探针** | v1.0.1 真机反馈「OK 5 失败 0 仍白屏」——瓦片真实下载成功但不渲染，问题锁定渲染层。采纳外部分析（见《地图加载问题审核报告》R4）：① 彻底移除 shouldInterceptRequest 拦截/TileCache 注入/预载，瓦片完全由 WebView 自取（与手机浏览器同链路）；② 诊断徽标升级为渲染探针（容器尺寸/瓦片像素尺寸/opacity/visibility/pane 状态，真机屏上直读）；③ 启动时清理旧缓存目录。缓存/预载待渲染问题确认修复后逐层加回 |
 | 08-20 | **真机实测锁定终极根因：高德风控占位图** | v1.0.0 真机仍空白：高德给 Kotlin 代下请求返回 HTTP 200 的 1×1 米色占位图（假成功毒化缓存、骗过回退看门狗）。四层修复：拦截层改缓存只读+WebView 自取为主（与浏览器行为一致）、占位图检测拒入缓存+历史中毒自清理、JS 侧按像素尺寸识破假成功（街道→OSM、卫星→新增 Esri 兜底）、UA 去自定义后缀；新增 TileCacheTest 5 项回归 |
 | 08-20 | **首个发行版 v1.0.0-android** | [GitHub Releases](https://github.com/ChenChen913/baibai/releases/tag/v1.0.0-android) 发布首个可安装 APK（含定位/地图两大修复，CI 全绿产物）；本地副本 `android/dist/app-debug.apk` 同步更新，后续每次发版同步 |
