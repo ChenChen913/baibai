@@ -83,6 +83,22 @@ class JsonStoreTest {
     }
 
     @Test
+    fun `clearSessions 后列表为空且可重新保存`() {
+        val store = JsonStore(tmp)
+        val r = RecorderState.fresh()
+        r.start(listOf(fix(HOME)), T0)
+        r.finish(listOf(fix(HOME)), T0 + 1000)
+        store.saveSession(r.snapshot())
+        assertEquals(1, store.listSessions().size)
+
+        store.clearSessions()
+        assertTrue(store.listSessions().isEmpty())
+
+        store.saveSession(r.snapshot()) // 清空后可再次保存（不残留坏目录）
+        assertEquals(1, store.listSessions().size)
+    }
+
+    @Test
     fun `导入导出往返（互通契约）`() {
         val store = JsonStore(tmp)
         val s = io.github.chenchen913.baibai.core.demo.Demo.generateDemoSession()

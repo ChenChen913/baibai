@@ -45,6 +45,11 @@ class JsonStore(
         File(dir, CHECKPOINT_FILE).delete()
     }
 
+    /** 清空历史会话（测试辅助：每个用例干净起步，避免单例 store 跨用例残留） */
+    fun clearSessions() {
+        File(dir, SESSIONS_DIR).deleteRecursively()
+    }
+
     /** 结束后的历史会话 */
     fun saveSession(s: SessionData) {
         val f = File(dir, "$SESSIONS_DIR/${s.id}.json")

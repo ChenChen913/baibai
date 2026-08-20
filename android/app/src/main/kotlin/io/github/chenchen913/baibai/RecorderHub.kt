@@ -430,7 +430,10 @@ object RecorderHub {
 
     // ---------- 测试辅助 ----------
 
-    /** 仅测试用：清空运行时状态（可选保留存储，用于"崩溃恢复"场景模拟） */
+    /** 仅测试用：清空运行时状态（可选保留存储，用于"崩溃恢复"场景模拟）。
+     *  clearStore=true 同时清检查点与历史会话——RecorderHub 是跨用例单例、
+     *  store 指向首用例的 filesDir（Robolectric 每用例换新 Application 但不删旧目录），
+     *  不清 sessions 会跨用例残留，listSessions 断言依赖用例执行顺序。 */
     fun resetForTest(clearStore: Boolean) {
         recorder = null
         pendingFixes.clear()
@@ -440,7 +443,10 @@ object RecorderHub {
         _gpsAcc.value = null
         watchdogJob?.cancel()
         if (clearStore) {
-            runCatching { store.clearActive() }
+            runCatching {
+                store.clearActive()
+                store.clearSessions()
+            }
         }
     }
 }
