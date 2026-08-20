@@ -497,7 +497,7 @@ private fun MapLayer(ctl: MapController, pxHeight: Int) {
     // 光锥保持隐藏（map.html 里 opacity:0 初始态），不报错不打扰。
     // onSensorChanged 在主线程回调（HeadingSource 内部传了主线程 Handler），可直接 evaluateJavascript。
     DisposableEffect(Unit) {
-        val heading = HeadingSource(appContext) { RecorderHub.source?.lastFix?.pos }
+        val heading = HeadingSource(appContext, positionProvider = { RecorderHub.source?.lastFix?.pos })
         heading.onHeading = { deg ->
             val w = webView.value
             if (pageReady && w != null) {
