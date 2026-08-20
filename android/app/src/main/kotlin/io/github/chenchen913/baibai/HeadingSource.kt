@@ -5,7 +5,6 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.os.Looper
 import io.github.chenchen913.baibai.core.model.LatLng
 
 /**
@@ -29,8 +28,9 @@ import io.github.chenchen913.baibai.core.model.LatLng
  * 无 ROTATION_VECTOR 的设备（极老机型/模拟器）hasSensor=false，不注册——
  * UI 侧拿不到任何回调 → 光锥保持隐藏（静默降级，不报错不打扰）。
  *
- * 线程：registerListener 传主线程 Handler，onSensorChanged 在主线程回调，
- * 回调里直接 evaluateJavascript 安全（与现有 MapController.exec 同链路）。
+ * 线程：start() 恒在主线程调用（DisposableEffect），registerListener 默认绑定
+ * 调用线程的 Looper → onSensorChanged 在主线程回调，直接 evaluateJavascript 安全
+ * （与现有 MapController.exec 同链路）。
  */
 class HeadingSource(
     context: Context,
@@ -60,7 +60,10 @@ class HeadingSource(
         val s = rotSensor ?: return
         if (running) return
         running = true
-        sm.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME, mainHandler)
+        // 不显式传 Handler：默认用调用线程的 Looper——start() 恒在主线程（DisposableEffect）调用，
+        // onSensorChanged 即主线程回调。同时在 companion 里预建 Handler 会让单测类加载即崩
+        // （ExceptionInInitializerError：JVM 无 Looper），故不用。
+        sm.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME)
     }
 
     fun stop() {
@@ -101,7 +104,6 @@ class HeadingSource(
     }
 
     companion object {
-        private val mainHandler = android.os.Handler(Looper.getMainLooper())
 
         /** 最短弧差：把任意角度差折到 [-180, 180]（359°→1° 的差是 +2°，不是 -358°） */
         fun wrapDelta(deltaDeg: Double): Double {
