@@ -1,7 +1,7 @@
 # baibai（拜拜）· 乡村拜年轨迹复盘玩具
 
 > 🌐 **线上地址：https://chenchen913.github.io/baibai/** （手机浏览器打开，可添加到主屏幕）
-> 📱 **安卓版 APK**：`android/dist/app-debug.apk`（本地零工具链 · CI 云端构建）
+> 📱 **安卓版 APK**：[GitHub Releases 下载](https://github.com/ChenChen913/baibai/releases)（本地副本 `android/dist/app-debug.apk` · CI 云端构建，每次发版同步更新）
 
 记录大年初一走村串户的真实轨迹，拜完年回放路线、算出「当日最优」与「飞行最优」，三线动画对比——看看自己今年绕了多少路。年度独立、每年一局、纯本地、自己玩。
 
@@ -75,6 +75,7 @@ npm test         # vitest 单元测试（111 项）
 
 | 日期 | 事项 | 内容 |
 |---|---|---|
+| 08-20 | **首个发行版 v1.0.0-android** | [GitHub Releases](https://github.com/ChenChen913/baibai/releases/tag/v1.0.0-android) 发布首个可安装 APK（含定位/地图两大修复，CI 全绿产物）；本地副本 `android/dist/app-debug.apk` 同步更新，后续每次发版同步 |
 | 08-20 | **定位不准根因修复** | 双源坐标系网关：国产 ROM 网络定位返回 GCJ-02 与 GPS 的 WGS-84 混用导致 Home 定错坐标系、轨迹跳飞 300~600m——GPS 点到达后 8s 内丢弃网络点、基站粗定位（acc>300m）直接丢弃；首定 Home 改攒 3 个高精度 fix（窗 3s→10s，不再拿网络粗点凑数）；新增 LocationSourceTest 5 项网关回归 |
 | 08-20 | **地图不显示根因修复** | 拦截层同步下载（最长 9s/张）改限时 1.2s 回填（`downloadFast`，超时放行 WebView 自取、后台继续入缓存，实时回填专用线程池与预载隔离）；map.html 加看门狗：10s 内街道瓦片零成功立即回退 OSM（不再干等 6 次 tileerror） |
 | 08-20 | 验收清单补全 | 真机验收清单新增 3 项：adb force-stop 系统级强杀测试（§1）、未完成检查点导出识别契约 + 坏文件报错契约（§7，对照《数据格式》契约测试 3/4）；汇总表同步扩充；网页端 134 项单测 + 构建全绿作为验收基线 |
