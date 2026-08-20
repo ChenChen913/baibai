@@ -1,8 +1,10 @@
 package io.github.chenchen913.baibai.core
 
-import io.github.chenchen913.baibai.core.model.Fix
 import io.github.chenchen913.baibai.core.model.LatLng
+import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.SessionData
+import io.github.chenchen913.baibai.core.model.SessionState
+import io.github.chenchen913.baibai.core.model.Visit
 import io.github.chenchen913.baibai.core.playback.Playback
 import io.github.chenchen913.baibai.core.state.RecorderState
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -25,25 +27,58 @@ class PlaybackTest {
             HOME.lng + mE / R * 180.0 / PI / cos(HOME.lat * PI / 180.0),
         )
 
-        fun fix(pos: LatLng, acc: Double = 5.0) = Fix(pos, acc)
+        /**
+         * 字面量直造会话数据（R9 后 addPoint 有平滑窗口+连续确认过滤，合成稀疏点会被过滤，
+         * 本文件测的是回放抽稀/插值，不测入库过滤——与 demo 生成器同款构造方式）
+         */
+        fun makeSession(
+            nodes: List<Pair<String, LatLng>>,
+            visits: List<Triple<String, Long, Long>>, // nodeId, arriveT, leaveT
+            points: List<Pair<Long, LatLng>>, // t, pos
+        ): SessionData {
+            fun segOf(t: Long): String {
+                var seg = 0
+                for ((_, _, leaveT) in visits) if (t > leaveT) seg += 1
+                return "seg$seg"
+            }
+            return SessionData(
+                id = "test-session",
+                year = 2026,
+                date = "2026-02-17",
+                home = HOME,
+                nodes = nodes.mapIndexed { i, (id, pos) ->
+                    io.github.chenchen913.baibai.core.model.HouseNode(id, "", i + 1, pos)
+                },
+                visits = visits.map { (nodeId, arriveT, leaveT) ->
+                    Visit(nodeId, arriveT, leaveT, Mode.WALK)
+                },
+                points = points.map { (t, pos) ->
+                    io.github.chenchen913.baibai.core.model.TrackPoint(t, pos, 5.0, segOf(t))
+                },
+                state = SessionState.FINISHED,
+                currentMode = Mode.WALK,
+                finished = true,
+                createdAt = T0,
+                updatedAt = T0 + 10_000,
+            )
+        }
 
         /** 带拐角的轨迹：home → A → B → home */
-        fun cornerSession(): SessionData {
-            val r = RecorderState.fresh()
-            r.start(listOf(fix(HOME)), T0)
-            r.addPoint(at(0.0, 0.0), 5.0, T0 + 500)
-            r.addPoint(at(30.0, 0.0), 5.0, T0 + 700)
-            r.addPoint(at(60.0, 40.0), 5.0, T0 + 900) // 拐点
-            r.addPoint(at(90.0, 40.0), 5.0, T0 + 1100)
-            r.pause(listOf(fix(at(100.0, 40.0))), T0 + 2000) // A
-            r.resume(T0 + 3000)
-            r.addPoint(at(200.0, 40.0), 5.0, T0 + 3500)
-            r.pause(listOf(fix(at(300.0, 40.0))), T0 + 5000) // B
-            r.resume(T0 + 6000)
-            r.addPoint(at(150.0, 20.0), 5.0, T0 + 6500)
-            r.finish(listOf(fix(HOME)), T0 + 8000)
-            return r.snapshot()
-        }
+        fun cornerSession(): SessionData = makeSession(
+            nodes = listOf("nA" to at(100.0, 40.0), "nB" to at(300.0, 40.0)),
+            visits = listOf(
+                Triple("nA", T0 + 2000, T0 + 3000), // A
+                Triple("nB", T0 + 5000, T0 + 6000), // B
+            ),
+            points = listOf(
+                T0 + 500 to at(0.0, 0.0),
+                T0 + 700 to at(30.0, 0.0),
+                T0 + 900 to at(60.0, 40.0), // 拐点
+                T0 + 1100 to at(90.0, 40.0),
+                T0 + 3500 to at(200.0, 40.0),
+                T0 + 6500 to at(150.0, 20.0),
+            ),
+        )
     }
 
     // ---------- buildPlan ----------

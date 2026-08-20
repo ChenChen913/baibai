@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { RecorderState } from '../src/state.js';
+import { RecorderState, type SessionData } from '../src/state.js';
+import type { LatLng } from '../src/geo.js';
 import {
   mergeNodes,
   removePoint,
@@ -20,22 +21,60 @@ const far = (m: number, dir: 'n' | 'e' = 'n') => {
 const fix = (pos: { lat: number; lng: number }, acc = 5) => ({ pos, acc });
 const T0 = 1_700_000_000_000;
 
+/**
+ * 字面量直造会话数据（R9 后 addPoint 有平滑窗口+连续确认过滤，合成稀疏点会被过滤，
+ * 本文件测的是回顾编辑操作，不测入库过滤——与 demo.ts 同款构造方式）
+ */
+function makeSession(
+  nodes: Array<{ id: string; pos: LatLng }>,
+  visits: Array<{ nodeId: string; arriveT: number; leaveT: number }>,
+  points: Array<{ t: number; pos: LatLng }>,
+): SessionData {
+  const segOf = (t: number): string => {
+    let seg = 0;
+    for (const v of visits) if (t > v.leaveT) seg += 1;
+    return `seg${seg}`;
+  };
+  return {
+    id: 'test-session',
+    year: 2026,
+    date: '2026-02-17',
+    home: HOME,
+    nodes: nodes.map((n, i) => ({ id: n.id, name: '', autoNo: i + 1, pos: n.pos })),
+    visits: visits.map((v) => ({
+      nodeId: v.nodeId,
+      arriveT: v.arriveT,
+      leaveT: v.leaveT,
+      mode: 'walk' as const,
+    })),
+    points: points.map((p) => ({ t: p.t, pos: p.pos, acc: 5, seg: segOf(p.t) })),
+    state: 'FINISHED',
+    currentMode: 'walk',
+    finished: true,
+    createdAt: T0,
+    updatedAt: T0 + 10_000,
+  };
+}
+
 /** 两户场景：A（拜访两次，相距 8m 合并），B（拜访一次） */
 function twoNodeSession() {
-  const r = new RecorderState();
-  r.start([fix(HOME)], T0);
-  r.addPoint(HOME, 5, T0 + 100);
-  r.pause([fix(far(100))], T0 + 1000); // A 第 1 次
-  r.resume(T0 + 2000);
-  r.addPoint(far(104), 5, T0 + 2100); // 靠近 A 的点（供拆分取坐标）
-  r.pause([fix(far(108))], T0 + 3000); // A 第 2 次（8m 内合并）
-  r.resume(T0 + 4000);
-  r.addPoint(far(200), 5, T0 + 4100);
-  r.pause([fix(far(300))], T0 + 5000); // B
-  r.resume(T0 + 6000);
-  r.addPoint(HOME, 5, T0 + 6100);
-  r.finish([fix(HOME)], T0 + 7000);
-  return r.snapshot;
+  return makeSession(
+    [
+      { id: 'nA', pos: far(100) }, // A
+      { id: 'nB', pos: far(300) }, // B
+    ],
+    [
+      { nodeId: 'nA', arriveT: T0 + 1000, leaveT: T0 + 2000 }, // A 第 1 次
+      { nodeId: 'nA', arriveT: T0 + 3000, leaveT: T0 + 4000 }, // A 第 2 次（8m 内合并）
+      { nodeId: 'nB', arriveT: T0 + 5000, leaveT: T0 + 6000 }, // B
+    ],
+    [
+      { t: T0 + 100, pos: HOME },
+      { t: T0 + 2100, pos: far(104) }, // 靠近 A 的点（供拆分取坐标）
+      { t: T0 + 4100, pos: far(200) },
+      { t: T0 + 6100, pos: HOME },
+    ],
+  );
 }
 
 describe('renameNode', () => {

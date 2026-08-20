@@ -2,20 +2,17 @@ package io.github.chenchen913.baibai.core
 
 import io.github.chenchen913.baibai.core.demo.Demo
 import io.github.chenchen913.baibai.core.geo.Geo
-import io.github.chenchen913.baibai.core.model.Fix
 import io.github.chenchen913.baibai.core.model.LatLng
 import io.github.chenchen913.baibai.core.model.SessionData
 import io.github.chenchen913.baibai.core.model.SessionState
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.optimize.Optimize
 import io.github.chenchen913.baibai.core.optimize.RouteMode
-import io.github.chenchen913.baibai.core.state.RecorderState
 import io.github.chenchen913.baibai.core.track.Track
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.PI
-import kotlin.math.roundToInt
 
 /** 对应网页版 tests/optimize.test.ts 的 optimize 部分（6 项，逐位对齐；demo 3 项已在 A-M2） */
 class OptimizeTest {
@@ -25,7 +22,6 @@ class OptimizeTest {
         const val R = 6371000.0
         const val T0 = 1_700_000_000_000L
         fun far(m: Double): LatLng = LatLng(HOME.lat + m / R * 180.0 / PI, HOME.lng)
-        fun fix(pos: LatLng, acc: Double = 5.0) = Fix(pos, acc)
     }
 
     private fun posOf(s: SessionData, id: String): LatLng =
@@ -100,24 +96,30 @@ class OptimizeTest {
 
     @Test
     fun `同一对多次实走取最短耗时（D15）`() {
-        val r = RecorderState.fresh()
-        r.start(listOf(fix(HOME)), T0)
-        r.addPoint(HOME, 5.0, T0 + 100)
-        r.pause(listOf(fix(far(100.0))), T0 + 1000) // A
-        r.resume(T0 + 2000)
-        r.addPoint(far(150.0), 5.0, T0 + 2100)
-        r.pause(listOf(fix(far(200.0))), T0 + 10_000) // B（慢走 8s）
-        r.resume(T0 + 11_000)
-        r.addPoint(far(156.0), 5.0, T0 + 11_100) // R7 后重复坐标不入库——错开 6m 模拟真实走动
-        r.pause(listOf(fix(far(108.0))), T0 + 12_000) // 回 A（快走 1s）
-        r.resume(T0 + 13_000)
-        r.addPoint(far(150.0), 5.0, T0 + 13_100)
-        r.pause(listOf(fix(far(200.0))), T0 + 13_500) // 再 B（0.5s）
-        // R7：跳变点（<2s 且 >100m）不再入库——回家点与 far(150) 需隔 ≥2s，否则 B→home 边丢点
-        r.resume(T0 + 15_000)
-        r.addPoint(HOME, 5.0, T0 + 15_100)
-        r.finish(listOf(fix(HOME)), T0 + 16_000)
-        val s = r.snapshot()
+        // 场景：A→B 慢走一次（8s）、B→A 快走一次（1s）、A→B 再快走一次（0.5s）
+        // 字面量直造（R9 后 addPoint 过滤合成稀疏点，本测试只关心边耗时——与 demo 生成器同款构造）
+        val s = SessionData(
+            id = "test-session", year = 2026, date = "2026-02-17", home = HOME,
+            nodes = listOf(
+                io.github.chenchen913.baibai.core.model.HouseNode("nA", "", 1, far(100.0)),
+                io.github.chenchen913.baibai.core.model.HouseNode("nB", "", 2, far(200.0)),
+            ),
+            visits = listOf(
+                io.github.chenchen913.baibai.core.model.Visit("nA", T0 + 1000, T0 + 2000, Mode.WALK), // A
+                io.github.chenchen913.baibai.core.model.Visit("nB", T0 + 10_000, T0 + 11_000, Mode.WALK), // B（慢走 8s）
+                io.github.chenchen913.baibai.core.model.Visit("nA", T0 + 12_000, T0 + 13_000, Mode.WALK), // 回 A（快走 1s）
+                io.github.chenchen913.baibai.core.model.Visit("nB", T0 + 13_500, T0 + 15_000, Mode.WALK), // 再 B（0.5s）
+            ),
+            points = listOf(
+                io.github.chenchen913.baibai.core.model.TrackPoint(T0 + 100, HOME, 5.0, "seg0"),
+                io.github.chenchen913.baibai.core.model.TrackPoint(T0 + 2100, far(150.0), 5.0, "seg1"),
+                io.github.chenchen913.baibai.core.model.TrackPoint(T0 + 11_100, far(156.0), 5.0, "seg2"),
+                io.github.chenchen913.baibai.core.model.TrackPoint(T0 + 13_100, far(150.0), 5.0, "seg3"),
+                io.github.chenchen913.baibai.core.model.TrackPoint(T0 + 15_100, HOME, 5.0, "seg4"),
+            ),
+            state = SessionState.FINISHED, currentMode = Mode.WALK, finished = true,
+            createdAt = T0, updatedAt = T0 + 16_000,
+        )
 
         val edges = Track.buildEdges(s)
         fun key(a: String, b: String) = listOf(a, b).sorted().joinToString("|")

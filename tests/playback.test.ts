@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RecorderState } from '../src/state.js';
+import { RecorderState, type SessionData } from '../src/state.js';
 import { buildPlan, fractionAt, positionAt } from '../src/playback.js';
 
 const HOME = { lat: 31.0, lng: 121.0 };
@@ -8,25 +8,58 @@ const at = (mN: number, mE: number) => ({
   lat: HOME.lat + ((mN / R) * 180) / Math.PI,
   lng: HOME.lng + ((mE / R) * 180) / Math.PI / Math.cos((HOME.lat * Math.PI) / 180),
 });
-const fix = (pos: { lat: number; lng: number }, acc = 5) => ({ pos, acc });
 const T0 = 1_700_000_000_000;
+
+/**
+ * 字面量直造会话数据（R9 后 addPoint 有平滑窗口+连续确认过滤，合成稀疏点会被过滤，
+ * 本文件测的是回放抽稀/插值，不测入库过滤——与 demo.ts 同款构造方式）
+ */
+function makeSession(
+  nodes: Array<{ id: string; pos: ReturnType<typeof at> }>,
+  visits: Array<{ nodeId: string; arriveT: number; leaveT: number; mode: 'walk' | 'bike' }>,
+  points: Array<{ t: number; pos: ReturnType<typeof at> }>,
+): SessionData {
+  const segOf = (t: number): string => {
+    let seg = 0;
+    for (const v of visits) if (t > v.leaveT) seg += 1;
+    return `seg${seg}`;
+  };
+  return {
+    id: 'test-session',
+    year: 2026,
+    date: '2026-02-17',
+    home: HOME,
+    nodes: nodes.map((n, i) => ({ id: n.id, name: '', autoNo: i + 1, pos: n.pos })),
+    visits,
+    points: points.map((p) => ({ t: p.t, pos: p.pos, acc: 5, seg: segOf(p.t) })),
+    state: 'FINISHED',
+    currentMode: 'walk',
+    finished: true,
+    createdAt: T0,
+    updatedAt: T0 + 10_000,
+  };
+}
 
 /** 带拐角的轨迹：home → A → B → home */
 function cornerSession() {
-  const r = new RecorderState();
-  r.start([fix(HOME)], T0);
-  r.addPoint(at(0, 0), 5, T0 + 500);
-  r.addPoint(at(30, 0), 5, T0 + 700);
-  r.addPoint(at(60, 40), 5, T0 + 900); // 拐点
-  r.addPoint(at(90, 40), 5, T0 + 1100);
-  r.pause([fix(at(100, 40))], T0 + 2000); // A
-  r.resume(T0 + 3000);
-  r.addPoint(at(200, 40), 5, T0 + 3500);
-  r.pause([fix(at(300, 40))], T0 + 5000); // B
-  r.resume(T0 + 6000);
-  r.addPoint(at(150, 20), 5, T0 + 6500);
-  r.finish([fix(HOME)], T0 + 8000);
-  return r.snapshot;
+  return makeSession(
+    [
+      { id: 'nA', pos: at(100, 40) }, // A
+      { id: 'nB', pos: at(300, 40) }, // B
+    ],
+    [
+      { nodeId: 'nA', arriveT: T0 + 2000, leaveT: T0 + 3000, mode: 'walk' },
+      { nodeId: 'nB', arriveT: T0 + 5000, leaveT: T0 + 6000, mode: 'walk' },
+    ],
+    [
+      { t: T0 + 500, pos: at(0, 0) },
+      { t: T0 + 700, pos: at(30, 0) },
+      { t: T0 + 900, pos: at(60, 40) }, // 拐点
+      { t: T0 + 1100, pos: at(90, 40) },
+      { t: T0 + 3500, pos: at(200, 40) },
+      { t: T0 + 6500, pos: at(150, 20) },
+    ],
+  );
 }
 
 describe('buildPlan', () => {

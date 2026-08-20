@@ -81,6 +81,16 @@ object RecorderHub {
     private val pendingFixes = mutableListOf<Fix>()
     private var pendingStartAt = 0L
 
+    // R9（定位只做一次）：最近一次 fix 到达时刻——再次点「开始」时若缓存够新（10 分钟内）
+    // 直接复用 source.lastFix 定 Home，不再重新攒 fix 等待。
+    // 用户主诉：结束一次后再点「开始」又要重新等定位；拜年场景两次开始间隔通常只有几分钟。
+    // 只复用 GPS 点（src=="net" 的 GCJ-02 网络点坐标系不可靠，R6 教训）
+    private var lastFixArrivedAt = 0L
+
+    companion object {
+        private const val FIX_REUSE_MS = 10 * 60 * 1000L
+    }
+
     fun init(app: Application) {
         if (this::store.isInitialized) return
         context = app.applicationContext
@@ -184,6 +194,28 @@ object RecorderHub {
         pendingFixes.clear()
         pendingStartAt = nowMs()
         startKeepAliveService()
+        // R9（定位只做一次）：10 分钟内有 GPS 定位 → 直接复用定 Home，秒开记录，不再重新等待
+        val cached = source?.lastFix?.takeIf { it.src != "net" }
+        if (cached != null && lastFixArrivedAt > 0 && nowMs() - lastFixArrivedAt <= FIX_REUSE_MS) {
+            val fresh = RecorderState.fresh(_bizDate.value, pendingStartAt)
+            try {
+                fresh.start(listOf(cached), nowMs(), cached)
+            } catch (e: Exception) {
+                emit(e.message ?: "定位启动失败")
+                return
+            }
+            recorder = fresh
+            _waiting.value = false
+            watchdogJob?.cancel()
+            vibrate()
+            beep()
+            flushNow()
+            _session.value = fresh.snapshot()
+            // 复用只省「定 Home 的等待」；WALKING 的轨迹记录仍需立即恢复持续定位
+            ensureSourceRunning()
+            emit("定位已复用，开始记录！到一户按「暂停」")
+            return
+        }
         _waiting.value = true
         ensureSourceRunning()
         vibrate()
@@ -306,6 +338,7 @@ object RecorderHub {
     @Synchronized
     fun applyFix(f: Fix) {
         _gpsAcc.value = f.acc
+        lastFixArrivedAt = nowMs() // R9：记录 fix 到达时刻（供下次「开始」判断缓存时效）
         val r = recorder
         if (r == null && _waiting.value) {
             // 攒 3 个高精度 GPS fix（或 10 秒超时）→ 中位数定 Home；
@@ -318,7 +351,7 @@ object RecorderHub {
             val ready = goodGps >= 3 || (pendingFixes.isNotEmpty() && t - pendingStartAt >= 10_000)
             if (ready) {
                 val homeFixes = if (gpsFixes.isNotEmpty()) gpsFixes else pendingFixes
-                val fresh = RecorderState.fresh(_bizDate.value)
+                val fresh = RecorderState.fresh(_bizDate.value, pendingStartAt) // R9：用时从点击「开始」起算（含等定位阶段）
                 try {
                     fresh.start(homeFixes.toList(), t, f)
                 } catch (e: Exception) {
@@ -369,8 +402,11 @@ object RecorderHub {
     }
 
     fun elapsedMs(): Long {
-        val s = _session.value ?: return 0
-        // t0 用会话创建时刻（首个定位时刻），不用 points[0].t——
+        // R9：等定位期间也计时（从点击「开始」那刻起）——用户主诉"点开始后用时一直是 0"，
+        // 根因是旧版 waiting 阶段返回 0、且会话 createdAt 从拿到定位才起算，室内等 30 秒全程 00:00:00
+        val s = _session.value
+            ?: return if (_waiting.value) (nowMs() - pendingStartAt).coerceAtLeast(0) else 0
+        // t0 用会话创建时刻（= 点击「开始」时刻，applyFix 创建时显式传入），不用 points[0].t——
         // 首点迟到会让计时倒退（实机复现：定位稀疏时时间回跳/停滞）
         return (nowMs() - s.createdAt).coerceAtLeast(0)
     }
@@ -441,6 +477,7 @@ object RecorderHub {
         _pendingRestore.value = false
         _session.value = null
         _gpsAcc.value = null
+        lastFixArrivedAt = 0 // R9：缓存定位时效一并重置，防跨用例污染
         watchdogJob?.cancel()
         if (clearStore) {
             runCatching {

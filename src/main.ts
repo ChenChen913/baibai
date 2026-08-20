@@ -54,6 +54,10 @@ let pendingStart = false;
 // 首个定位的缓冲：攒 3 个 fix（或 3 秒）取中位数定 Home——单个 fix 噪声大（±10m+）
 const pendingFixes: Fix[] = [];
 let pendingStartAt = 0;
+// R9（定位只做一次）：最近一次 fix 到达时刻 + 缓存的 fix 本体——
+// 再次点「开始」时若缓存够新（10 分钟内）直接复用定 Home，不再重新等待定位
+let lastFixArrivedAt = 0;
+const FIX_REUSE_MS = 10 * 60 * 1000;
 let wakeLock: { release: () => Promise<void> } | null = null;
 let view: 'record' | 'history' | 'review' | 'optimize' | 'plan' = 'record';
 let mapCtrl: MapController | null = null;
@@ -161,8 +165,12 @@ function flush(): void {
 }
 
 function elapsedMs(): number {
-  if (!recorder) return 0;
-  // t0 用会话创建时刻（首个定位时刻），不用 points[0].t——
+  // R9：等定位期间也计时（从点击「开始」那刻起）——用户主诉"点开始后用时一直是 0"，
+  // 根因是旧版 waiting 阶段返回 0、且会话 createdAt 从拿到定位才起算，室内等 30 秒全程 00:00:00
+  if (!recorder) {
+    return pendingStart ? Math.max(0, now() - pendingStartAt) : 0;
+  }
+  // t0 用会话创建时刻（= 点击「开始」时刻，onFix 创建时显式传入），不用 points[0].t——
   // 首点迟到会让计时倒退（实机复现：定位稀疏时时间回跳/停滞）
   return Math.max(0, now() - recorder.snapshot.createdAt);
 }
@@ -180,9 +188,37 @@ function mountRecord(): Ui {
   ui = mountUi(app, {
     onStart() {
       if (recorder) return;
+      pendingStartAt = now();
+      // R9（定位只做一次）：10 分钟内已有定位 → 直接复用定 Home，秒开记录，不再重新等待。
+      // 用户主诉：结束一次后再点「开始」又要重新等定位——拜年场景两次开始间隔通常只有几分钟
+      const cached = gps.lastFix;
+      if (cached && lastFixArrivedAt > 0 && now() - lastFixArrivedAt <= FIX_REUSE_MS) {
+        const r = new RecorderState({
+          date: toDateStr(bizDate),
+          year: bizDate.getFullYear(),
+          createdAt: pendingStartAt, // R9：用时从点击「开始」起算
+        });
+        try {
+          r.start([cached], now(), cached);
+        } catch (e) {
+          ui.toast((e as Error).message);
+          return;
+        }
+        recorder = r;
+        pendingStart = false;
+        window.clearTimeout(gpsWatchdog);
+        vibrate();
+        beep();
+        flush();
+        syncMap();
+        // 复用只省「定 Home 的等待」；WALKING 的轨迹记录仍需立即恢复持续定位
+        gps.start({ onFix, onError: handleGpsError });
+        void requestWakeLock();
+        ui.toast('定位已复用，开始记录！到一户按「暂停」');
+        return;
+      }
       pendingStart = true;
       pendingFixes.length = 0;
-      pendingStartAt = now();
       try {
         gps.start({ onFix, onError: handleGpsError });
         void requestWakeLock();
@@ -402,6 +438,7 @@ let ui: Ui;
 ui = mountRecord();
 
 function onFix(f: Fix): void {
+  lastFixArrivedAt = now(); // R9：记录 fix 到达时刻（供下次「开始」判断缓存时效）
   if (pendingStart && !recorder) {
     // 攒 3 个 fix（或 3 秒）→ 中位数定 Home；单个 fix 噪声太大
     pendingFixes.push(f);
@@ -409,6 +446,7 @@ function onFix(f: Fix): void {
       recorder = new RecorderState({
         date: toDateStr(bizDate),
         year: bizDate.getFullYear(),
+        createdAt: pendingStartAt, // R9：用时从点击「开始」起算（含等定位阶段）
       });
       try {
         recorder.start(pendingFixes, now(), f);

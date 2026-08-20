@@ -172,4 +172,43 @@ class RecorderHubTest {
         RecorderHub.consumeFinishedSession()
         assertNull(RecorderHub.session.value)
     }
+
+    // ---------- R9（真机第三轮：定位只做一次 + 用时从点击起算） ----------
+
+    @Test
+    fun `R9 定位只做一次：结束后再次开始直接复用缓存秒开，不再等定位`() {
+        RecorderHub.startPressed()
+        fake.push(HOME, src = "gps")
+        fake.push(HOME, src = "gps")
+        fake.push(HOME, src = "gps")
+        assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
+        RecorderHub.finishPressed(force = true)
+        RecorderHub.consumeFinishedSession()
+        assertNull(RecorderHub.recorder)
+
+        // 再次开始：上次 GPS 定位在 10 分钟内 → 直接复用定 Home，立即 WALKING（waiting 从未置 true）
+        RecorderHub.startPressed()
+        assertEquals(false, RecorderHub.waiting.value)
+        assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
+        assertEquals(HOME, RecorderHub.recorder?.snapshot()?.home) // Home = 复用的缓存 GPS 点
+        RecorderHub.finishPressed(force = true)
+    }
+
+    @Test
+    fun `R9 网络点不参与缓存复用：坐标系安全（GCJ-02 不得定为 Home）`() {
+        RecorderHub.startPressed()
+        // 仅网络点（GCJ-02 坐标系，与 GPS 差 300~600m）：即使刚拿到也不可复用为 Home
+        fake.push(LatLng(HOME.lat + 0.004, HOME.lng + 0.005), 30.0, src = "net")
+        assertNull(RecorderHub.recorder) // 网络点不计就绪数，仍在等待
+
+        // 冷启动首次定位：网络点也不满足"3 个好 GPS"就绪条件 → 走 10s 超时兜底（此处直接验证未秒开）
+        assertEquals(true, RecorderHub.waiting.value)
+        // GPS 点到达后正常攒满 3 个开始
+        fake.push(HOME, src = "gps")
+        fake.push(HOME, src = "gps")
+        fake.push(HOME, src = "gps")
+        assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
+        assertEquals(HOME, RecorderHub.recorder?.snapshot()?.home)
+        RecorderHub.finishPressed(force = true)
+    }
 }

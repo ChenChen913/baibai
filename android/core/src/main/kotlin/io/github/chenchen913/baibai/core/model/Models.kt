@@ -14,6 +14,11 @@ object Constants {
     const val MIN_MOVE_M = 5.0 // R7/R8：静止位移门槛基线——GPS 报多少米精度，就至少走够多少米才入库
     const val MOVE_THR_MAX_M = 30.0 // R8：精度自适应门槛上限——acc 再差也保证真实走动每 ~30m 留一个点
     const val SMOOTH_WINDOW = 5 // R8：中位数平滑窗口大小——吸收振荡抖动与单点坏值
+
+    // R9：静止越久门槛越高（真机第三轮：漂移"一阵一阵"——中位数挡不住单向慢漂，门槛随静止时长抬升压制）
+    const val IDLE_GROW_M_PER_S = 0.5 // R9：静止门槛增速——0.5m/s（人从静止起步的合理加速度以下）
+    const val MOVE_THR_IDLE_CAP_M = 50.0 // R9：静止门槛封顶——再久也不超过 50m（保证真实走动最迟 50m 必留点）
+    const val MOVE_CONFIRM_N = 2 // R9：连续确认——连续 2 个平滑候选都超门槛才入库（挡"一阵"短暂漂移）
     const val MIN_VIEW_SPAN_M = 60.0 // R7：回放/回顾投影最小跨度——静止小点团不得被放大充满视口
     const val R = 6371000.0
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { haversineM } from '../src/geo.js';
 import { generateDemoSession } from '../src/demo.js';
 import { buildPlan } from '../src/playback.js';
-import { RecorderState } from '../src/state.js';
 import { optimizeSession } from '../src/optimize.js';
 import { buildEdges } from '../src/track.js';
 import type { SessionData } from '../src/state.js';
@@ -13,7 +12,6 @@ const far = (m: number) => ({
   lat: HOME.lat + ((m / R) * 180) / Math.PI,
   lng: HOME.lng,
 });
-const fix = (pos: { lat: number; lng: number }, acc = 5) => ({ pos, acc });
 const T0 = 1_700_000_000_000;
 
 const posOf = (s: SessionData, id: string) =>
@@ -97,24 +95,35 @@ describe('optimizeSession', () => {
 
   it('同一对多次实走取最短耗时（D15）', () => {
     // 场景：A→B 慢走一次（8s）、B→A 快走一次（1s）、A→B 再快走一次（0.5s）
-    const r = new RecorderState();
-    r.start([fix(HOME)], T0);
-    r.addPoint(HOME, 5, T0 + 100);
-    r.pause([fix(far(100))], T0 + 1000); // A
-    r.resume(T0 + 2000);
-    r.addPoint(far(150), 5, T0 + 2100);
-    r.pause([fix(far(200))], T0 + 10_000); // B（慢走 8s）
-    r.resume(T0 + 11_000);
-    r.addPoint(far(156), 5, T0 + 11_100); // R7 后重复坐标不入库——错开 6m 模拟真实走动
-    r.pause([fix(far(108))], T0 + 12_000); // 回 A（快走 1s）
-    r.resume(T0 + 13_000);
-    r.addPoint(far(150), 5, T0 + 13_100);
-    r.pause([fix(far(200))], T0 + 13_500); // 再 B（0.5s）
-    // R7：跳变点（<2s 且 >100m）不再入库——回家点与 far(150) 需隔 ≥2s，否则 B→home 边丢点
-    r.resume(T0 + 15_000);
-    r.addPoint(HOME, 5, T0 + 15_100);
-    r.finish([fix(HOME)], T0 + 16_000);
-    const s = r.snapshot;
+    // 字面量直造（R9 后 addPoint 过滤合成稀疏点，本测试只关心边耗时——与 demo.ts 同款构造）
+    const s: SessionData = {
+      id: 'test-session',
+      year: 2026,
+      date: '2026-02-17',
+      home: HOME,
+      nodes: [
+        { id: 'nA', name: '', autoNo: 1, pos: far(100) },
+        { id: 'nB', name: '', autoNo: 2, pos: far(200) },
+      ],
+      visits: [
+        { nodeId: 'nA', arriveT: T0 + 1000, leaveT: T0 + 2000, mode: 'walk' }, // A
+        { nodeId: 'nB', arriveT: T0 + 10_000, leaveT: T0 + 11_000, mode: 'walk' }, // B（慢走 8s）
+        { nodeId: 'nA', arriveT: T0 + 12_000, leaveT: T0 + 13_000, mode: 'walk' }, // 回 A（快走 1s）
+        { nodeId: 'nB', arriveT: T0 + 13_500, leaveT: T0 + 15_000, mode: 'walk' }, // 再 B（0.5s）
+      ],
+      points: [
+        { t: T0 + 100, pos: HOME, acc: 5, seg: 'seg0' },
+        { t: T0 + 2100, pos: far(150), acc: 5, seg: 'seg1' },
+        { t: T0 + 11_100, pos: far(156), acc: 5, seg: 'seg2' },
+        { t: T0 + 13_100, pos: far(150), acc: 5, seg: 'seg3' },
+        { t: T0 + 15_100, pos: HOME, acc: 5, seg: 'seg4' },
+      ],
+      state: 'FINISHED',
+      currentMode: 'walk',
+      finished: true,
+      createdAt: T0,
+      updatedAt: T0 + 16_000,
+    };
 
     const edges = buildEdges(s);
     const pairKey = (a: string, b: string) => [a, b].sort().join('|');

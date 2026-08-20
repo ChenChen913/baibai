@@ -52,6 +52,10 @@ export const JUMP_DT_MS = 2000;
 export const MIN_MOVE_M = 5; // R7/R8：静止位移门槛基线——GPS 报多少米精度，就至少走够多少米才入库
 export const MOVE_THR_MAX_M = 30; // R8：精度自适应门槛上限——acc 再差也保证真实走动每 ~30m 留一个点
 export const SMOOTH_WINDOW = 5; // R8：中位数平滑窗口大小——吸收振荡抖动与单点坏值
+// R9：静止越久门槛越高（真机第三轮：漂移"一阵一阵"——中位数挡不住单向慢漂，门槛随静止时长抬升压制）
+export const IDLE_GROW_M_PER_S = 0.5; // R9：静止门槛增速——0.5m/s（人从静止起步的合理加速度以下）
+export const MOVE_THR_IDLE_CAP_M = 50; // R9：静止门槛封顶——再久也不超过 50m（保证真实走动最迟 50m 必留点）
+export const MOVE_CONFIRM_N = 2; // R9：连续确认——连续 2 个平滑候选都超门槛才入库（挡"一阵"短暂漂移）
 
 export type Action =
   | { type: 'start' }
@@ -78,6 +82,11 @@ export class RecorderState {
   private segCounter = 0;
   // R8：中位数平滑窗口（运行时态，不入快照/检查点——崩溃恢复后从空窗重启，无碍）
   private smoothBuf: LatLng[] = [];
+  // R9：连续确认计数（运行时态，不入快照/检查点——与 smoothBuf 一同从 0 重启）
+  private confirmCount = 0;
+  // R9.1：本段（start/resume 起）行走起点时刻——静止门槛的"静止时长"只算段内，
+  // 不把在户内停留的几分钟算进去（否则出门短走访 <50m 永远追不上门槛，整段零入库丢边）
+  private segStartT = 0;
 
   constructor(init: Partial<SessionData> = {}) {
     this.s = {
@@ -134,6 +143,8 @@ export class RecorderState {
     this.s.state = 'WALKING';
     this.s.finished = false;
     this.smoothBuf = []; // R8：新会话平滑窗口从空开始
+    this.confirmCount = 0; // R9：确认链一并清零
+    this.segStartT = now; // R9.1：段起点
     this.actions.push({ type: 'start' });
     this.touch(now);
   }
@@ -199,6 +210,8 @@ export class RecorderState {
     this.segCounter += 1;
     this.s.state = 'WALKING';
     this.smoothBuf = []; // R8：新段平滑窗口从空开始（上一段的旧 fix 不拖慢本段起步）
+    this.confirmCount = 0; // R9：确认链一并清零
+    this.segStartT = now; // R9.1：新段起点——户内停留时长不计入静止门槛
     this.actions.push({ type: 'resume' });
     this.touch(now);
   }
@@ -242,20 +255,24 @@ export class RecorderState {
 
   /**
    * 记录轨迹点（仅 WALKING）。
-   * R8 三道入口闸门（真机主诉第二轮：静止 1~2 分钟仍拉出小段偏移轨迹）。
-   * 根因：R7 固定 5m 门槛小于真实静止抖动幅度（室内散布直径 10~40m）——
-   * 振荡抖动一旦越过 5m 就入库，之后基准跟着抖动走，慢慢拉出小圈。
+   * R8 三道入口闸门 + R9 三道补强（真机第三轮：漂移"一阵一阵"——概率性出现小偏移轨迹）。
+   * R8 根因：中位数只能挡"振荡抖动"，挡不住"单向慢漂移"（多路径效应下单向游走，
+   * 中位数跟着走）；且窗口未满 3 个样本时候选=原始抖动点；国产 ROM acc 虚标 5m 时门槛过低。
    *
    * ① 跳变丢弃（R7 原样）：距上一入库点 2s 内 >100m（人力不可达，必为 GPS 坏点）
    *    直接丢弃且不进平滑窗口（防污染中位数），返回值带 jump 标记；
-   * ② 中位数平滑（R8 新增）：原始 fix 进入滑动窗口（SMOOTH_WINDOW 个），
-   *    入库候选 = 窗口各分量中位数（样本 ≥3 才可信，不足用原始值）——
-   *    振荡抖动的中位数恒在抖动团中心，天然不长线；单点坏值被窗口吸收；
-   * ③ 静止过滤（R8 精度自适应）：门槛 = min(max(5m, acc), 30m)——
-   *    GPS 报多少米精度，就要求稳定估计至少走够多少米才入库，
-   *    坐在室内（acc 15~40m）时门槛抬到 15~30m，抖动全滤；acc 上限 30m
-   *    保证真实走动最差也每 ~30m 留一个点，轨迹形状不丢。
-   * ④ 入库后窗口重置（R8 新增）：新入库点成为下一轮平滑锚点，防止旧抖动残留拖慢起步。
+   * ② 中位数平滑（R8 原样）：原始 fix 进入滑动窗口（SMOOTH_WINDOW 个），
+   *    入库候选 = 窗口各分量中位数（样本 ≥3 才可信，不足用原始值）；
+   * ③ 窗口未满不入库（R9 新增）：首点后窗口攒满 3 个样本前一律不入库——
+   *    挡住"开始初期第 2 个原始抖动点直入"的漏洞（起步记录最多延迟 ~3 秒，无碍）；
+   * ④ 静止门槛随段内静止时长抬升（R9 新增，R9.1 修正起算点）：
+   *    thr = min(max(5m, acc), 30m) + 段内静止秒数 × 0.5m/s，封顶 50m——
+   *    单向慢漂移（<0.5m/s）永远追不上门槛，彻底不长线；
+   *    静止时长从 max(上一入库点, 段起点) 起算：段起点 = start/resume 时刻，
+   *    在户内停留的几分钟不算静止——否则出门走访邻户（<50m）整段零入库、回顾页丢边；
+   * ⑤ 连续确认（R9 新增）：连续 MOVE_CONFIRM_N 个平滑候选都超门槛才入库——
+   *    "一阵"短暂漂移超门槛一两秒后回落，确认链断裂被挡；真走动持续超门槛，确认链成立；
+   * ⑥ 入库后窗口重置 + 确认清零（R8 原样扩展）：新入库点成为下一轮平滑锚点。
    */
   addPoint(pos: LatLng, acc: number, now: number): TrackPoint {
     if (this.s.state !== 'WALKING') {
@@ -277,14 +294,26 @@ export class RecorderState {
     const cand = this.smoothBuf.length >= 3 ? medianPos(this.smoothBuf)! : pos;
     const p: TrackPoint = { t: now, pos: cand, acc, seg };
     if (prev) {
-      // ③ 精度自适应静止门槛
-      const thr = Math.min(Math.max(MIN_MOVE_M, acc), MOVE_THR_MAX_M);
-      if (haversineM(prev.pos, cand) < thr) {
-        return p; // 稳定估计未走出门槛 → 不入库
+      // ③ 窗口未满 3：不判定（攒样本）——防开始初期原始抖动点直入
+      if (this.smoothBuf.length < 3) return p;
+      // ④ 静止门槛 = 精度自适应基线 + 段内静止时长增速，封顶 50m
+      //    R9.1：静止时长从 max(上一入库点, 段起点) 起算——在户内停留的几分钟不算静止，
+      //    否则出门后走访隔壁邻户（<50m）永远追不上门槛，整段零入库、回顾页丢边
+      const base = Math.min(Math.max(MIN_MOVE_M, acc), MOVE_THR_MAX_M);
+      const idleSec = (now - Math.max(prev.t, this.segStartT)) / 1000;
+      const thr = Math.min(base + idleSec * IDLE_GROW_M_PER_S, MOVE_THR_IDLE_CAP_M);
+      const dist = haversineM(prev.pos, cand);
+      // ⑤ 连续确认：连续 MOVE_CONFIRM_N 个候选都超门槛才入库
+      if (dist < thr) {
+        this.confirmCount = 0; // 回落 → 确认链断裂
+        return p;
       }
+      this.confirmCount += 1;
+      if (this.confirmCount < MOVE_CONFIRM_N) return p;
     }
     this.s.points.push(p);
-    this.smoothBuf = [cand]; // ④ 入库后窗口重置
+    this.smoothBuf = [cand]; // ⑥ 入库后窗口重置
+    this.confirmCount = 0;
     return p;
   }
 
@@ -308,6 +337,8 @@ export class RecorderState {
         this.s.state = 'IDLE';
         this.segCounter = 0;
         this.smoothBuf = []; // R8：平滑窗口一并清空
+        this.confirmCount = 0; // R9：确认链一并清零
+        this.segStartT = 0; // R9.1：段起点一并复位
         break;
       case 'pause': {
         this.s.visits.pop();

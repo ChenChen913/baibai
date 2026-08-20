@@ -233,7 +233,11 @@ describe('跳变防护（D22 最小版）', () => {
     expect(p1.jump).toBe(true);
     const p2 = r.addPoint(far(600), 5, T0 + 5000);
     expect(p2.jump).toBeUndefined();
-    // R7：跳变点直接丢弃——返回值带标记，但 points 只含 HOME 与 far(600)
+    // R7：跳变点直接丢弃——返回值带标记；R9：跳变后窗口未满 3 个样本不判定
+    r.addPoint(far(600), 5, T0 + 6000); // 攒窗口
+    r.addPoint(far(600), 5, T0 + 7000); // 窗口满 3：第 1 次确认
+    r.addPoint(far(600), 5, T0 + 8000); // 第 2 次确认 → 入库
+    // points 只含 HOME 与 far(600)（真实快速移动/跳变超时后正常记录）
     expect(r.snapshot.points).toHaveLength(2);
   });
 
@@ -244,19 +248,25 @@ describe('跳变防护（D22 最小版）', () => {
 });
 
 describe('静止过滤（R8 真机修复）', () => {
-  it('R8 平滑窗口：中位数稳定估计走够门槛才入库，入库点即中位数', () => {
+  it('R9 平滑窗口+门槛+确认：中位数候选连续超门槛才入库，入库点即中位数', () => {
     const r = started();
-    r.addPoint(HOME, 5, T0);
-    r.addPoint(far(3), 5, T0 + 1000); // 3m 抖动：原始候选 <5m → 不入库
-    r.addPoint(far(4), 5, T0 + 2000); // 窗口≥3：中位数 far(3)，距 HOME 3m → 不入库
-    r.addPoint(far(6), 5, T0 + 3000); // 窗口 [0,3,4,6] 中位数仍 far(3) → 不入库
-    r.addPoint(far(9), 5, T0 + 4000); // 窗口 [0,3,4,6,9] 中位数 far(4) → 仍不足 5m
+    r.addPoint(HOME, 5, T0); // 首点直入
+    r.addPoint(far(3), 5, T0 + 1000); // 窗口 [3] 未满 3 → 攒样本不入库（R9：堵"初期原始点直入"漏洞）
+    r.addPoint(far(4), 5, T0 + 2000); // 窗口 [3,4] 未满 3 → 不入库
+    r.addPoint(far(6), 5, T0 + 3000); // 窗口 [3,4,6] 中位 far(4)：dist=4 < thr(5+1.5) → 不入库
+    r.addPoint(far(9), 5, T0 + 4000); // 窗口 [3,4,6,9] 中位 far(4)：dist=4 < thr(5+2) → 不入库
+    r.addPoint(far(12), 5, T0 + 5000); // 窗口 [3,4,6,9,12] 中位 far(6)：dist=6 < thr(5+2.5) → 不入库
     expect(r.snapshot.points).toHaveLength(1);
-    r.addPoint(far(12), 5, T0 + 5000); // 窗口滑至 [3,4,6,9,12]：中位数 far(6) ≥5m → 入库
+    r.addPoint(far(16), 5, T0 + 6000); // 中位 far(9)：dist=9 > thr(5+3)=8 → 第 1 次确认
+    expect(r.snapshot.points).toHaveLength(1); // 连续确认未满 2 → 仍不入库
+    r.addPoint(far(20), 5, T0 + 7000); // 中位 far(12)：dist=12 > thr(5+3.5) → 第 2 次确认 → 入库
     expect(r.snapshot.points).toHaveLength(2);
-    expect(r.snapshot.points[1].pos).toEqual(far(6)); // 入库的是中位数（稳定估计）
-    r.addPoint(far(15), 5, T0 + 6000); // 入库后窗口重置：原始候选 far(15) 距 far(6) 9m → 入库
+    expect(r.snapshot.points[1].pos).toEqual(far(12)); // 入库的是中位数（稳定估计）
+    r.addPoint(far(24), 5, T0 + 8000); // 入库后窗口重置 [12]：未满 3 → 攒样本
+    r.addPoint(far(28), 5, T0 + 9000); // [12,24,28] 中位 far(24)：dist=12 > thr(5+1) → 第 1 次确认
+    r.addPoint(far(32), 5, T0 + 10000); // [12,24,28,32] 中位 far(24)：dist=12 > thr(5+1.5) → 第 2 次确认 → 入库
     expect(r.snapshot.points).toHaveLength(3);
+    expect(r.snapshot.points[2].pos).toEqual(far(24));
   });
 
   it('坐着不动 2 分钟：抖动点全被过滤，轨迹不长线', () => {
@@ -297,6 +307,86 @@ describe('静止过滤（R8 真机修复）', () => {
     const pts = r.snapshot.points;
     expect(pts.length).toBeGreaterThanOrEqual(3);
     expect(haversineM(HOME, pts[pts.length - 1].pos)).toBeGreaterThan(25); // 末点已远离 Home
+  });
+});
+
+describe('漂移根治（R9 真机第三轮：一阵一阵概率性漂移）', () => {
+  it('R9 单向慢漂移（0.3m/s 持续 2 分钟）：漂移速度追不上门槛增速，零入库', () => {
+    // R8 残留根因：中位数挡得住"振荡抖动"，挡不住"单向慢漂移"（多路径下单向游走，中位数跟着走）
+    // R9 对策：门槛 = base + 静止秒数 × 0.5m/s——漂移 0.3m/s < 0.5m/s 恒追不上 → 永不长线
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    for (let i = 1; i <= 120; i++) {
+      r.addPoint(far(0.3 * i), 5, T0 + i * 1000);
+    }
+    expect(r.snapshot.points).toHaveLength(1);
+  });
+
+  it('R9 散布+偶发漂移阵（真机"一阵一阵"仿真）：入库点 ≤2，轨迹总长 <30m', () => {
+    // 真机模型：90% 时间 ±8m 散布；10% 时间漂到 ±25m（"一阵一阵"），acc 虚标 5m
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    let seed = 42;
+    const rnd = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    let off = 0;
+    for (let i = 1; i <= 120; i++) {
+      const base = (rnd() - 0.5) * 16; // ±8m 散布
+      const drift = rnd() < 0.1 ? (rnd() - 0.5) * 50 : 0; // 偶发 ±25m 漂移阵
+      off = base + drift;
+      r.addPoint(far(off), 5, T0 + i * 1000);
+    }
+    const pts = r.snapshot.points;
+    expect(pts.length).toBeLessThanOrEqual(2); // 仅首点（至多再漏 1 个漂移点）
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += haversineM(pts[i - 1].pos, pts[i].pos);
+    expect(len).toBeLessThan(30); // 不再拉出长线
+  });
+
+  it('R9 窗口未满不入库：开始初期 2 秒内的原始抖动点直入漏洞已堵', () => {
+    // R8 漏洞：首点后窗口只有 1 个样本时候选=原始点——抖动 20m 直接入库画线
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    r.addPoint(far(20), 5, T0 + 1000); // 大幅抖动：窗口 [20] 未满 3 → 攒样本，不入库
+    r.addPoint(far(20), 5, T0 + 2000); // 窗口 [20,20] 未满 3 → 不入库
+    r.addPoint(far(2), 5, T0 + 3000); // 窗口 [20,20,2] 中位 far(20)：dist=20 > thr(5+1.5) → 第 1 次确认
+    r.addPoint(far(2), 5, T0 + 4000); // 窗口 [20,20,2,2] 中位回落 far(2)：dist=2 < thr → 确认链断裂
+    r.addPoint(far(2), 5, T0 + 5000); // 中位 far(2)：不足门槛 → 不入
+    // 短暂 2 秒的 20m 抖动完全被挡——R8 旧版第 2 个点（原始候选）已直入库画线
+    expect(r.snapshot.points).toHaveLength(1);
+  });
+
+  it('R9 短暂漂移阵（超门槛 1 秒即回落）：连续确认链断裂，不入库', () => {
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    r.addPoint(far(2), 5, T0 + 1000); // 攒窗口
+    r.addPoint(far(3), 5, T0 + 2000);
+    r.addPoint(far(15), 5, T0 + 3000); // 窗口 [2,3,15] 中位 far(3)：dist=3 < thr → 不入
+    r.addPoint(far(15), 5, T0 + 4000); // [2,3,15,15] 中位 far(9)：dist=9 > thr(5+2) → 确认 1
+    r.addPoint(far(3), 5, T0 + 5000); // [2,3,15,15,3] 中位 far(3)：dist=3 < thr → 确认链断裂
+    r.addPoint(far(3), 5, T0 + 6000); // 中位 far(3)：仍不足 → 不入
+    expect(r.snapshot.points).toHaveLength(1); // "一阵"漂移被连续确认挡住
+  });
+
+  it('R9 真实步行（1.3m/s 持续 60 秒）：轨迹正常记录，末点已远离 Home', () => {
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    for (let i = 1; i <= 60; i++) {
+      r.addPoint(far(1.3 * i), 5, T0 + i * 1000);
+    }
+    const pts = r.snapshot.points;
+    expect(pts.length).toBeGreaterThanOrEqual(4); // 轨迹形状保留
+    expect(haversineM(HOME, pts[pts.length - 1].pos)).toBeGreaterThan(60); // 末点距 Home ≥60m
+  });
+
+  it('R9 createdAt 可显式指定：用时从点击「开始」起算（含等定位阶段）', () => {
+    const t0 = 1_700_000_999_000;
+    const r = new RecorderState({ createdAt: t0 });
+    expect(r.snapshot.createdAt).toBe(t0);
+    r.start(fixes(HOME), t0 + 30_000); // 等 30 秒定位后才 WALKING
+    expect(r.snapshot.createdAt).toBe(t0); // 计时起点仍是点击时刻
   });
 });
 

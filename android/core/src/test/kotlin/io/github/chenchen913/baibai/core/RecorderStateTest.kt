@@ -260,7 +260,11 @@ class RecorderStateTest {
         assertEquals(true, p1.jump)
         val p2 = r.addPoint(far(600.0), 5.0, T0 + 5000)
         assertNull(p2.jump)
-        // R7：跳变点直接丢弃——返回值带标记，但 points 只含 HOME 与 far(600)
+        // R7：跳变点直接丢弃——返回值带标记；R9：跳变后窗口未满 3 个样本不判定
+        r.addPoint(far(600.0), 5.0, T0 + 6000) // 攒窗口
+        r.addPoint(far(600.0), 5.0, T0 + 7000) // 窗口满 3：第 1 次确认
+        r.addPoint(far(600.0), 5.0, T0 + 8000) // 第 2 次确认 → 入库
+        // points 只含 HOME 与 far(600)（真实快速移动/跳变超时后正常记录）
         assertEquals(2, r.snapshot().points.size)
     }
 
@@ -273,19 +277,25 @@ class RecorderStateTest {
     // ---------- 静止过滤（R8 真机修复） ----------
 
     @Test
-    fun `R8 平滑窗口：中位数稳定估计走够门槛才入库，入库点即中位数`() {
+    fun `R9 平滑窗口+门槛+确认：中位数候选连续超门槛才入库，入库点即中位数`() {
         val r = started()
-        r.addPoint(HOME, 5.0, T0)
-        r.addPoint(far(3.0), 5.0, T0 + 1000) // 3m 抖动：原始候选 <5m → 不入库
-        r.addPoint(far(4.0), 5.0, T0 + 2000) // 窗口≥3：中位数 far(3)，距 HOME 3m → 不入库
-        r.addPoint(far(6.0), 5.0, T0 + 3000) // 窗口 [0,3,4,6] 中位数仍 far(3) → 不入库
-        r.addPoint(far(9.0), 5.0, T0 + 4000) // 窗口 [0,3,4,6,9] 中位数 far(4) → 仍不足 5m
+        r.addPoint(HOME, 5.0, T0) // 首点直入
+        r.addPoint(far(3.0), 5.0, T0 + 1000) // 窗口 [3] 未满 3 → 攒样本不入库（R9：堵"初期原始点直入"漏洞）
+        r.addPoint(far(4.0), 5.0, T0 + 2000) // 窗口 [3,4] 未满 3 → 不入库
+        r.addPoint(far(6.0), 5.0, T0 + 3000) // 窗口 [3,4,6] 中位 far(4)：dist=4 < thr(5+1.5) → 不入库
+        r.addPoint(far(9.0), 5.0, T0 + 4000) // 窗口 [3,4,6,9] 中位 far(4)：dist=4 < thr(5+2) → 不入库
+        r.addPoint(far(12.0), 5.0, T0 + 5000) // 窗口 [3,4,6,9,12] 中位 far(6)：dist=6 < thr(5+2.5) → 不入库
         assertEquals(1, r.snapshot().points.size)
-        r.addPoint(far(12.0), 5.0, T0 + 5000) // 窗口滑至 [3,4,6,9,12]：中位数 far(6) ≥5m → 入库
+        r.addPoint(far(16.0), 5.0, T0 + 6000) // 中位 far(9)：dist=9 > thr(5+3)=8 → 第 1 次确认
+        assertEquals(1, r.snapshot().points.size) // 连续确认未满 2 → 仍不入库
+        r.addPoint(far(20.0), 5.0, T0 + 7000) // 中位 far(12)：dist=12 > thr(5+3.5) → 第 2 次确认 → 入库
         assertEquals(2, r.snapshot().points.size)
-        assertEquals(far(6.0), r.snapshot().points[1].pos) // 入库的是中位数（稳定估计）
-        r.addPoint(far(15.0), 5.0, T0 + 6000) // 入库后窗口重置：原始候选 far(15) 距 far(6) 9m → 入库
+        assertEquals(far(12.0), r.snapshot().points[1].pos) // 入库的是中位数（稳定估计）
+        r.addPoint(far(24.0), 5.0, T0 + 8000) // 入库后窗口重置 [12]：未满 3 → 攒样本
+        r.addPoint(far(28.0), 5.0, T0 + 9000) // [12,24,28] 中位 far(24)：dist=12 > thr(5+1) → 第 1 次确认
+        r.addPoint(far(32.0), 5.0, T0 + 10000) // [12,24,28,32] 中位 far(24)：dist=12 > thr(5+1.5) → 第 2 次确认 → 入库
         assertEquals(3, r.snapshot().points.size)
+        assertEquals(far(24.0), r.snapshot().points[2].pos)
     }
 
     @Test
@@ -331,6 +341,92 @@ class RecorderStateTest {
         val pts = r.snapshot().points
         assertTrue(pts.size >= 3)
         assertTrue(io.github.chenchen913.baibai.core.geo.Geo.haversineM(HOME, pts.last().pos) > 25) // 末点已远离 Home
+    }
+
+    // ---------- 漂移根治（R9 真机第三轮：一阵一阵概率性漂移） ----------
+
+    @Test
+    fun `R9 单向慢漂移（30cm每秒 持续 2 分钟）：漂移速度追不上门槛增速，零入库`() {
+        // R8 残留根因：中位数挡得住"振荡抖动"，挡不住"单向慢漂移"（多路径下单向游走，中位数跟着走）
+        // R9 对策：门槛 = base + 静止秒数 × 0.5m/s——漂移 0.3m/s < 0.5m/s 恒追不上 → 永不长线
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        for (i in 1..120) {
+            r.addPoint(far(0.3 * i), 5.0, T0 + i * 1000)
+        }
+        assertEquals(1, r.snapshot().points.size)
+    }
+
+    @Test
+    fun `R9 散布+偶发漂移阵（真机一阵一阵仿真）：入库点至多 2，轨迹总长小于 30m`() {
+        // 真机模型：90% 时间 ±8m 散布；10% 时间漂到 ±25m（"一阵一阵"），acc 虚标 5m
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        var seed = 42L
+        fun rnd(): Double {
+            seed = (seed * 1664525L + 1013904223L) % 4294967296L
+            return seed.toDouble() / 4294967296.0
+        }
+        for (i in 1..120) {
+            val base = (rnd() - 0.5) * 16 // ±8m 散布
+            val drift = if (rnd() < 0.1) (rnd() - 0.5) * 50 else 0.0 // 偶发 ±25m 漂移阵
+            r.addPoint(far(base + drift), 5.0, T0 + i * 1000)
+        }
+        val pts = r.snapshot().points
+        assertTrue(pts.size <= 2) // 仅首点（至多再漏 1 个漂移点）
+        var len = 0.0
+        for (i in 1 until pts.size) {
+            len += io.github.chenchen913.baibai.core.geo.Geo.haversineM(pts[i - 1].pos, pts[i].pos)
+        }
+        assertTrue(len < 30) // 不再拉出长线
+    }
+
+    @Test
+    fun `R9 窗口未满不入库：开始初期 2 秒内的原始抖动点直入漏洞已堵`() {
+        // R8 漏洞：首点后窗口只有 1 个样本时候选=原始点——抖动 20m 直接入库画线
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        r.addPoint(far(20.0), 5.0, T0 + 1000) // 大幅抖动：窗口 [20] 未满 3 → 攒样本，不入库
+        r.addPoint(far(20.0), 5.0, T0 + 2000) // 窗口 [20,20] 未满 3 → 不入库
+        r.addPoint(far(2.0), 5.0, T0 + 3000) // 窗口 [20,20,2] 中位 far(20)：dist=20 > thr(5+1.5) → 第 1 次确认
+        r.addPoint(far(2.0), 5.0, T0 + 4000) // 窗口 [20,20,2,2] 中位回落 far(2)：dist=2 < thr → 确认链断裂
+        r.addPoint(far(2.0), 5.0, T0 + 5000) // 中位 far(2)：不足门槛 → 不入
+        // 短暂 2 秒的 20m 抖动完全被挡——R8 旧版第 2 个点（原始候选）已直入库画线
+        assertEquals(1, r.snapshot().points.size)
+    }
+
+    @Test
+    fun `R9 短暂漂移阵（超门槛 1 秒即回落）：连续确认链断裂，不入库`() {
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        r.addPoint(far(2.0), 5.0, T0 + 1000) // 攒窗口
+        r.addPoint(far(3.0), 5.0, T0 + 2000)
+        r.addPoint(far(15.0), 5.0, T0 + 3000) // 窗口 [2,3,15] 中位 far(3)：dist=3 < thr → 不入
+        r.addPoint(far(15.0), 5.0, T0 + 4000) // [2,3,15,15] 中位 far(9)：dist=9 > thr(5+2) → 确认 1
+        r.addPoint(far(3.0), 5.0, T0 + 5000) // [2,3,15,15,3] 中位 far(3)：dist=3 < thr → 确认链断裂
+        r.addPoint(far(3.0), 5.0, T0 + 6000) // 中位 far(3)：仍不足 → 不入
+        assertEquals(1, r.snapshot().points.size) // "一阵"漂移被连续确认挡住
+    }
+
+    @Test
+    fun `R9 真实步行（130cm每秒 持续 60 秒）：轨迹正常记录，末点已远离 Home`() {
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        for (i in 1..60) {
+            r.addPoint(far(1.3 * i), 5.0, T0 + i * 1000)
+        }
+        val pts = r.snapshot().points
+        assertTrue(pts.size >= 4) // 轨迹形状保留
+        assertTrue(io.github.chenchen913.baibai.core.geo.Geo.haversineM(HOME, pts.last().pos) > 60) // 末点距 Home ≥60m
+    }
+
+    @Test
+    fun `R9 createdAt 可显式指定：用时从点击开始起算（含等定位阶段）`() {
+        val t0 = 1_700_000_999_000L
+        val r = RecorderState.fresh(createdAtMs = t0)
+        assertEquals(t0, r.snapshot().createdAt)
+        r.start(fixes(HOME), t0 + 30_000) // 等 30 秒定位后才 WALKING
+        assertEquals(t0, r.snapshot().createdAt) // 计时起点仍是点击时刻
     }
 
     // ---------- 出行方式（D19 R1） ----------

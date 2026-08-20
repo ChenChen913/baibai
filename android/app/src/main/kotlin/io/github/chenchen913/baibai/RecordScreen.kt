@@ -709,7 +709,7 @@ private fun BrandChip(bizDate: java.time.LocalDate, onPickDate: () -> Unit) {
         }
         Spacer(Modifier.width(6.dp))
         Text(
-            "拜拜 · 拜年智驾",
+            "拜拜",
             fontSize = 13.sp,
             fontWeight = FontWeight.Black,
             fontFamily = FontFamily.Serif,
@@ -831,7 +831,8 @@ private fun Dashboard(
             DashVDivider()
             DashCell(label = "实走距离", modifier = Modifier.weight(1f)) {
                 Text(
-                    "%.1f".format(distKm),
+                    // R9：0.1km 粒度太粗（走几十米看不出变化），改 10m 粒度——与网页版对齐
+                    "%.2f".format(distKm),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace,

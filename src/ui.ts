@@ -85,7 +85,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
             <div class="hud-top-bar">
               <div class="glass-hud hud-brand-chip">
                 <div class="brand-badge-icon">${ICONS.fire}</div>
-                <span class="brand-title font-cny-serif">拜拜 · 拜年智驾</span>
+                <span class="brand-title font-cny-serif">拜拜</span>
                 <button id="btn-date" class="date-chip-btn" aria-label="选择拜年日期">大年初一</button>
               </div>
 
@@ -538,7 +538,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       }
       distKm = dM / 1000;
     }
-    $('stat-dist').textContent = distKm.toFixed(1);
+    $('stat-dist').textContent = distKm.toFixed(2); // R9：0.1km 粒度太粗（走几十米看不出变化），改 10m 粒度
 
     // 动态 Banner 指示文案
     const bannerText = $('banner-text');

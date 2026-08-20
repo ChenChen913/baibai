@@ -4,6 +4,8 @@ import io.github.chenchen913.baibai.core.model.Fix
 import io.github.chenchen913.baibai.core.model.LatLng
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.SessionData
+import io.github.chenchen913.baibai.core.model.SessionState
+import io.github.chenchen913.baibai.core.model.Visit
 import io.github.chenchen913.baibai.core.state.RecorderState
 import io.github.chenchen913.baibai.core.track.Track
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -27,23 +29,56 @@ class TrackTest {
 
         fun fix(pos: LatLng, acc: Double = 5.0) = Fix(pos, acc)
 
-        /** 三段场景：home→A→B→home */
-        fun threeStopSession(): SessionData {
-            val r = RecorderState.fresh()
-            r.start(listOf(fix(HOME)), T0)
-            r.addPoint(HOME, 5.0, T0 + 500)
-            r.addPoint(far(30.0), 5.0, T0 + 700)
-            r.addPoint(far(60.0), 5.0, T0 + 900)
-            r.addPoint(far(90.0), 5.0, T0 + 1100)
-            r.pause(listOf(fix(far(100.0))), T0 + 2000) // A
-            r.resume(T0 + 3000)
-            r.addPoint(far(50.0), 5.0, T0 + 3500) // A→B 途中
-            r.pause(listOf(fix(far(300.0))), T0 + 5000) // B
-            r.resume(T0 + 6000)
-            r.addPoint(far(150.0), 5.0, T0 + 6500) // B→home 途中
-            r.finish(listOf(fix(HOME)), T0 + 8000)
-            return r.snapshot()
+        /**
+         * 字面量直造会话数据（R9 后 addPoint 有平滑窗口+连续确认过滤，合成稀疏点会被过滤，
+         * 本文件测的是分段/投影等下游逻辑，不测入库过滤——与 demo 生成器同款构造方式）
+         */
+        fun makeSession(
+            nodes: List<Pair<String, LatLng>>, // id → pos（autoNo 按序 1..n）
+            visits: List<Visit>,
+            points: List<Pair<Long, LatLng>>, // t → pos（acc 固定 5，段 id 按离开时刻递增）
+        ): SessionData {
+            fun segOf(t: Long): String {
+                var seg = 0
+                for (v in visits) if (v.leaveT != null && t > v.leaveT!!) seg += 1
+                return "seg$seg"
+            }
+            return SessionData(
+                id = "test-session",
+                year = 2026,
+                date = "2026-02-17",
+                home = HOME,
+                nodes = nodes.mapIndexed { i, (id, pos) ->
+                    io.github.chenchen913.baibai.core.model.HouseNode(id, "", i + 1, pos)
+                },
+                visits = visits,
+                points = points.map { (t, pos) ->
+                    io.github.chenchen913.baibai.core.model.TrackPoint(t, pos, 5.0, segOf(t))
+                },
+                state = SessionState.FINISHED,
+                currentMode = Mode.WALK,
+                finished = true,
+                createdAt = T0,
+                updatedAt = T0 + 10_000,
+            )
         }
+
+        /** 三段场景：home→A→B→home */
+        fun threeStopSession(): SessionData = makeSession(
+            nodes = listOf("nA" to far(100.0), "nB" to far(300.0)),
+            visits = listOf(
+                Visit("nA", T0 + 2000, T0 + 3000, Mode.WALK), // A
+                Visit("nB", T0 + 5000, T0 + 6000, Mode.WALK), // B
+            ),
+            points = listOf(
+                T0 + 500 to HOME, // home→A 途中
+                T0 + 700 to far(30.0),
+                T0 + 900 to far(60.0),
+                T0 + 1100 to far(90.0),
+                T0 + 3500 to far(50.0), // A→B 途中
+                T0 + 6500 to far(150.0), // B→home 途中
+            ),
+        )
     }
 
     // ---------- buildEdges ----------
@@ -62,18 +97,19 @@ class TrackTest {
 
     @Test
     fun `buildEdges 出行方式归属`() {
-        val r = RecorderState.fresh()
-        r.start(listOf(fix(HOME)), T0)
-        r.addPoint(HOME, 5.0, T0 + 100)
-        r.pause(listOf(fix(far(100.0))), T0 + 1000)
-        r.resume(T0 + 2000)
-        r.setMode(Mode.BIKE, T0 + 2500)
-        r.addPoint(far(50.0), 5.0, T0 + 2600)
-        r.pause(listOf(fix(far(300.0))), T0 + 3000)
-        r.resume(T0 + 4000)
-        r.addPoint(far(150.0), 5.0, T0 + 4100)
-        r.finish(listOf(fix(HOME)), T0 + 5000)
-        val edges = Track.buildEdges(r.snapshot())
+        val s = makeSession(
+            nodes = listOf("nA" to far(100.0), "nB" to far(300.0)),
+            visits = listOf(
+                Visit("nA", T0 + 1000, T0 + 2000, Mode.WALK),
+                Visit("nB", T0 + 3000, T0 + 4000, Mode.BIKE), // 骑车去 B
+            ),
+            points = listOf(
+                T0 + 100 to HOME,
+                T0 + 2600 to far(50.0),
+                T0 + 4100 to far(150.0), // 走回家
+            ),
+        )
+        val edges = Track.buildEdges(s)
         assertEquals(3, edges.size)
         assertEquals(Mode.WALK, edges[0].mode) // home→A
         assertEquals(Mode.BIKE, edges[1].mode) // A→B
@@ -82,20 +118,20 @@ class TrackTest {
 
     @Test
     fun `buildEdges 中途回 Home：多段循环`() {
-        val r = RecorderState.fresh()
-        r.start(listOf(fix(HOME)), T0)
-        r.addPoint(HOME, 5.0, T0 + 100)
-        r.pause(listOf(fix(far(100.0))), T0 + 1000) // A
-        r.resume(T0 + 2000)
-        r.addPoint(far(50.0), 5.0, T0 + 2100)
-        r.pause(listOf(fix(far(5.0))), T0 + 3000) // 合并回 Home
-        r.resume(T0 + 4000)
-        r.addPoint(HOME, 5.0, T0 + 4100)
-        r.pause(listOf(fix(far(200.0))), T0 + 5000) // C
-        r.resume(T0 + 6000)
-        r.addPoint(far(6.0), 5.0, T0 + 6100) // 走回家（门口 6m 处；R7 后距上一入库点需 ≥5m 才入点）
-        r.finish(listOf(fix(HOME)), T0 + 7000)
-        val s = r.snapshot()
+        val s = makeSession(
+            nodes = listOf("nA" to far(100.0), "nC" to far(200.0)),
+            visits = listOf(
+                Visit("nA", T0 + 1000, T0 + 2000, Mode.WALK), // A
+                Visit("home", T0 + 3000, T0 + 4000, Mode.WALK), // 合并回 Home
+                Visit("nC", T0 + 5000, T0 + 6000, Mode.WALK), // C
+            ),
+            points = listOf(
+                T0 + 100 to HOME,
+                T0 + 2100 to far(50.0),
+                T0 + 4100 to HOME,
+                T0 + 6100 to far(6.0), // 走回家（门口 6m 处）
+            ),
+        )
         val (nA, nC) = s.nodes.map { it.id }
         assertEquals(
             listOf("home→$nA", "$nA→home", "home→$nC", "$nC→home"),

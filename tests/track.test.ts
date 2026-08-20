@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { RecorderState } from '../src/state.js';
+import { RecorderState, type Mode, type SessionData } from '../src/state.js';
+import type { LatLng } from '../src/geo.js';
 import { buildEdges, projectToView, toSvgPath } from '../src/track.js';
 
 const HOME = { lat: 31.0, lng: 121.0 };
@@ -14,22 +15,62 @@ const far = (m: number, dir: 'n' | 'e' = 'n') => {
 const fix = (pos: { lat: number; lng: number }, acc = 5) => ({ pos, acc });
 const T0 = 1_700_000_000_000;
 
+/**
+ * 字面量直造会话数据（R9 后 addPoint 有平滑窗口+连续确认过滤，合成稀疏点会被过滤，
+ * 本文件测的是分段/投影等下游逻辑，不测入库过滤——与 demo.ts 同款构造方式）
+ */
+function makeSession(
+  nodes: Array<{ id: string; pos: LatLng }>,
+  visits: Array<{ nodeId: string; arriveT: number; leaveT: number; mode: Mode }>,
+  points: Array<{ t: number; pos: LatLng }>,
+): SessionData {
+  // 段 id 按离开时刻递增（与状态机 resume 的 segCounter 语义一致）
+  const segOf = (t: number): string => {
+    let seg = 0;
+    for (const v of visits) if (t > v.leaveT) seg += 1;
+    return `seg${seg}`;
+  };
+  return {
+    id: 'test-session',
+    year: 2026,
+    date: '2026-02-17',
+    home: HOME,
+    nodes: nodes.map((n, i) => ({ id: n.id, name: '', autoNo: i + 1, pos: n.pos })),
+    visits: visits.map((v) => ({
+      nodeId: v.nodeId,
+      arriveT: v.arriveT,
+      leaveT: v.leaveT,
+      mode: v.mode,
+    })),
+    points: points.map((p) => ({ t: p.t, pos: p.pos, acc: 5, seg: segOf(p.t) })),
+    state: 'FINISHED',
+    currentMode: 'walk',
+    finished: true,
+    createdAt: T0,
+    updatedAt: T0 + 10_000,
+  };
+}
+
 /** 构造三段场景：home→A→B→home */
 function threeStopSession() {
-  const r = new RecorderState();
-  r.start([fix(HOME)], T0);
-  r.addPoint(HOME, 5, T0 + 500); // home→A 途中
-  r.addPoint(far(30, 'n'), 5, T0 + 700);
-  r.addPoint(far(60, 'n'), 5, T0 + 900);
-  r.addPoint(far(90, 'n'), 5, T0 + 1100);
-  r.pause([fix(far(100))], T0 + 2000); // A
-  r.resume(T0 + 3000);
-  r.addPoint(far(50, 'n'), 5, T0 + 3500); // A→B 途中
-  r.pause([fix(far(300))], T0 + 5000); // B
-  r.resume(T0 + 6000);
-  r.addPoint(far(150, 'n'), 5, T0 + 6500); // B→home 途中
-  r.finish([fix(HOME)], T0 + 8000);
-  return r.snapshot;
+  return makeSession(
+    [
+      { id: 'nA', pos: far(100) }, // A
+      { id: 'nB', pos: far(300) }, // B
+    ],
+    [
+      { nodeId: 'nA', arriveT: T0 + 2000, leaveT: T0 + 3000, mode: 'walk' },
+      { nodeId: 'nB', arriveT: T0 + 5000, leaveT: T0 + 6000, mode: 'walk' },
+    ],
+    [
+      { t: T0 + 500, pos: HOME }, // home→A 途中
+      { t: T0 + 700, pos: far(30, 'n') },
+      { t: T0 + 900, pos: far(60, 'n') },
+      { t: T0 + 1100, pos: far(90, 'n') },
+      { t: T0 + 3500, pos: far(50, 'n') }, // A→B 途中
+      { t: T0 + 6500, pos: far(150, 'n') }, // B→home 途中
+    ],
+  );
 }
 
 describe('buildEdges', () => {
@@ -56,18 +97,22 @@ describe('buildEdges', () => {
   });
 
   it('出行方式归属：进入该停靠点那次访问的 mode', () => {
-    const r = new RecorderState();
-    r.start([fix(HOME)], T0);
-    r.addPoint(HOME, 5, T0 + 100);
-    r.pause([fix(far(100))], T0 + 1000);
-    r.resume(T0 + 2000);
-    r.setMode('bike', T0 + 2500); // 骑车去 B
-    r.addPoint(far(50), 5, T0 + 2600);
-    r.pause([fix(far(300))], T0 + 3000);
-    r.resume(T0 + 4000);
-    r.addPoint(far(150, 'n'), 5, T0 + 4100); // 走回家
-    r.finish([fix(HOME)], T0 + 5000);
-    const edges = buildEdges(r.snapshot);
+    const s = makeSession(
+      [
+        { id: 'nA', pos: far(100) },
+        { id: 'nB', pos: far(300) },
+      ],
+      [
+        { nodeId: 'nA', arriveT: T0 + 1000, leaveT: T0 + 2000, mode: 'walk' },
+        { nodeId: 'nB', arriveT: T0 + 3000, leaveT: T0 + 4000, mode: 'bike' }, // 骑车去 B
+      ],
+      [
+        { t: T0 + 100, pos: HOME },
+        { t: T0 + 2600, pos: far(50) },
+        { t: T0 + 4100, pos: far(150, 'n') }, // 走回家
+      ],
+    );
+    const edges = buildEdges(s);
     expect(edges).toHaveLength(3);
     expect(edges[0].mode).toBe('walk'); // home→A
     expect(edges[1].mode).toBe('bike'); // A→B
@@ -75,20 +120,23 @@ describe('buildEdges', () => {
   });
 
   it('中途回 Home：多段循环天然成立', () => {
-    const r = new RecorderState();
-    r.start([fix(HOME)], T0);
-    r.addPoint(HOME, 5, T0 + 100);
-    r.pause([fix(far(100))], T0 + 1000); // A
-    r.resume(T0 + 2000);
-    r.addPoint(far(50), 5, T0 + 2100);
-    r.pause([fix(far(5))], T0 + 3000); // 合并回 Home
-    r.resume(T0 + 4000);
-    r.addPoint(HOME, 5, T0 + 4100);
-    r.pause([fix(far(200))], T0 + 5000); // C
-    r.resume(T0 + 6000);
-    r.addPoint(far(6), 5, T0 + 6100); // 走回家（门口 6m 处；R7 后距上一入库点需 ≥5m 才入点）
-    r.finish([fix(HOME)], T0 + 7000);
-    const s = r.snapshot;
+    const s = makeSession(
+      [
+        { id: 'nA', pos: far(100) },
+        { id: 'nC', pos: far(200) },
+      ],
+      [
+        { nodeId: 'nA', arriveT: T0 + 1000, leaveT: T0 + 2000, mode: 'walk' }, // A
+        { nodeId: 'home', arriveT: T0 + 3000, leaveT: T0 + 4000, mode: 'walk' }, // 合并回 Home
+        { nodeId: 'nC', arriveT: T0 + 5000, leaveT: T0 + 6000, mode: 'walk' }, // C
+      ],
+      [
+        { t: T0 + 100, pos: HOME },
+        { t: T0 + 2100, pos: far(50) },
+        { t: T0 + 4100, pos: HOME },
+        { t: T0 + 6100, pos: far(6) }, // 走回家（门口 6m 处）
+      ],
+    );
     const [nA, nC] = s.nodes.map((n) => n.id);
     const edges = buildEdges(s);
     expect(edges.map((e) => `${e.fromId}→${e.toId}`)).toEqual([
