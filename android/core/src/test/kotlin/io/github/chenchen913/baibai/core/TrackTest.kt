@@ -93,7 +93,7 @@ class TrackTest {
         r.addPoint(HOME, 5.0, T0 + 4100)
         r.pause(listOf(fix(far(200.0))), T0 + 5000) // C
         r.resume(T0 + 6000)
-        r.addPoint(HOME, 5.0, T0 + 6100)
+        r.addPoint(far(6.0), 5.0, T0 + 6100) // 走回家（门口 6m 处；R7 后距上一入库点需 ≥5m 才入点）
         r.finish(listOf(fix(HOME)), T0 + 7000)
         val s = r.snapshot()
         val (nA, nC) = s.nodes.map { it.id }
@@ -152,5 +152,22 @@ class TrackTest {
     @Test
     fun `toSvgPath 空点集返回空串`() {
         assertEquals("", Track.toSvgPath(emptyList(), 400.0, 300.0))
+    }
+
+    @Test
+    fun `R7 静止小点团不放大充满视口（最小跨度 60m）`() {
+        // 坐板凳 2 分钟的抖动团：纬度方向 0~3m。旧版投影会把 3m 跨度放大到全屏画成一团乱线
+        val pts = listOf(far(0.0), far(2.0), far(1.0), far(3.0))
+        val proj = Track.projectToView(pts, 400.0, 300.0)
+        val xs = proj.map { it.x }
+        val ys = proj.map { it.y }
+        // 实际跨度 3m / 最小跨度 60m → 像素跨度 ≈ usableH 的 5%（12px），留足余量断言 ≤40px
+        assertTrue((xs.max() - xs.min()) <= 40.0)
+        assertTrue((ys.max() - ys.min()) <= 40.0)
+        // 点团居中：质心在视口中心附近（不偏到角落）
+        val cx = xs.average()
+        val cy = ys.average()
+        assertTrue(kotlin.math.abs(cx - 200.0) <= 20.0)
+        assertTrue(kotlin.math.abs(cy - 150.0) <= 20.0)
     }
 }

@@ -86,7 +86,7 @@ describe('buildEdges', () => {
     r.addPoint(HOME, 5, T0 + 4100);
     r.pause([fix(far(200))], T0 + 5000); // C
     r.resume(T0 + 6000);
-    r.addPoint(HOME, 5, T0 + 6100); // 走回家
+    r.addPoint(far(6), 5, T0 + 6100); // 走回家（门口 6m 处；R7 后距上一入库点需 ≥5m 才入点）
     r.finish([fix(HOME)], T0 + 7000);
     const s = r.snapshot;
     const [nA, nC] = s.nodes.map((n) => n.id);
@@ -155,5 +155,21 @@ describe('SVG 投影', () => {
 
   it('空点集返回空串', () => {
     expect(toSvgPath([], 400, 300)).toBe('');
+  });
+
+  it('R7：静止小点团不放大充满视口（最小跨度 60m）', () => {
+    // 坐板凳 2 分钟的抖动团：纬度方向 0~3m。旧版投影会把 3m 跨度放大到全屏画成一团乱线
+    const pts = [far(0), far(2), far(1), far(3)];
+    const proj = projectToView(pts, 400, 300);
+    const xs = proj.map((p) => p.x);
+    const ys = proj.map((p) => p.y);
+    // 实际跨度 3m / 最小跨度 60m → 像素跨度 ≈ usableH 的 5%（12px），留足余量断言 ≤40px
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThanOrEqual(40);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(40);
+    // 点团居中：质心在视口中心附近（不偏到角落）
+    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+    expect(Math.abs(cx - 200)).toBeLessThanOrEqual(20);
+    expect(Math.abs(cy - 150)).toBeLessThanOrEqual(20);
   });
 });

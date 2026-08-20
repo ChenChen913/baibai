@@ -227,20 +227,29 @@ class RecorderState private constructor(
         touch(now)
     }
 
-    /** 记录轨迹点（仅 WALKING）；跳变防护（D22 最小版） */
+    /**
+     * 记录轨迹点（仅 WALKING）。
+     * R7 两道入口闸门（真机主诉：人坐着不动，回放却拉出复杂轨迹；与网页版 state.ts 语义逐位一致）：
+     * ① 跳变丢弃：2s 内位移 >100m（180km/h，人力不可达，必为 GPS 坏点）不入库，
+     *    返回值带 jump 标记供调用方感知——回顾页「跳变点列表」因此恒空，属预期；
+     * ② 静止过滤：距上一入库点 <5m（GPS 静止抖动 3~10m）不入库——人不动就不长轨迹。
+     * 注意过滤基准是「上一入库点」而非上一个 fix：连续小幅抖动累计不破闸。
+     */
     @Synchronized
     fun addPoint(pos: LatLng, acc: Double, now: Long): TrackPoint {
         if (state != SessionState.WALKING) {
             throw IllegalStateException("非法转移：仅移动中记录轨迹点")
         }
-        var p = TrackPoint(t = now, pos = pos, acc = acc, seg = "seg$segCounter")
+        val p = TrackPoint(t = now, pos = pos, acc = acc, seg = "seg$segCounter")
         val prev = points.lastOrNull()
-        if (
-            prev != null &&
-            now - prev.t < Constants.JUMP_DT_MS &&
-            Geo.haversineM(prev.pos, pos) > Constants.JUMP_DIST_M
-        ) {
-            p = p.copy(jump = true)
+        if (prev != null) {
+            val d = Geo.haversineM(prev.pos, pos)
+            if (now - prev.t < Constants.JUMP_DT_MS && d > Constants.JUMP_DIST_M) {
+                return p.copy(jump = true) // ① 跳变点直接丢弃（不入库）
+            }
+            if (d < Constants.MIN_MOVE_M) {
+                return p // ② 静止抖动不入库
+            }
         }
         points += p
         return p

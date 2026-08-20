@@ -94,11 +94,32 @@ object Track {
         return Bounds(minLat, maxLat, minLng, maxLng)
     }
 
-    /** 等比投影到视口（北在上、留白 10%），全部点落在 [0,w]×[0,h] 内 */
+    /**
+     * 等比投影到视口（北在上、留白 10%），全部点落在 [0,w]×[0,h] 内。
+     * R7：跨度下限 MIN_VIEW_SPAN_M（60m）——静止小点团（几米抖动范围）不得被放大充满视口；
+     * 仅在任一方向跨度低于下限时以实际中心扩展，大跨度场景投影结果与旧版逐位一致（与网页版 track.ts 同步）。
+     */
     fun projectToView(pts: List<LatLng>, w: Double, h: Double, pad: Double = 0.1): List<XY> {
         val b = boundsOf(pts) ?: return emptyList()
-        val spanLat = max(b.maxLat - b.minLat, 1e-9)
-        val spanLng = max(b.maxLng - b.minLng, 1e-9)
+        // 米→度换算（等距圆柱近似）：纬度 1° ≈ 111320m；经度 1° ≈ 111320·cos(纬度)
+        val cLat = (b.maxLat + b.minLat) / 2
+        val cLng = (b.maxLng + b.minLng) / 2
+        val rad = Math.PI / 180
+        val minSpanLat = Constants.MIN_VIEW_SPAN_M / 111320.0
+        val minSpanLng = Constants.MIN_VIEW_SPAN_M / (111320.0 * kotlin.math.cos(cLat * rad))
+        var spanLat = max(b.maxLat - b.minLat, 1e-9)
+        var spanLng = max(b.maxLng - b.minLng, 1e-9)
+        var minLat = b.minLat
+        var maxLat = b.maxLat
+        var minLng = b.minLng
+        if (spanLat < minSpanLat || spanLng < minSpanLng) {
+            // 小点团：以实际 bounds 中心扩展跨度（点团居中），不再放大到充满视口
+            spanLat = max(spanLat, minSpanLat)
+            spanLng = max(spanLng, minSpanLng)
+            minLat = cLat - spanLat / 2
+            maxLat = cLat + spanLat / 2
+            minLng = cLng - spanLng / 2
+        }
         val usableW = w * (1 - 2 * pad)
         val usableH = h * (1 - 2 * pad)
         val s = min(usableW / spanLng, usableH / spanLat)
@@ -108,8 +129,8 @@ object Track {
         val oy = (h - drawH) / 2
         return pts.map { p ->
             XY(
-                x = ox + (p.lng - b.minLng) * s,
-                y = oy + (b.maxLat - p.lat) * s,
+                x = ox + (p.lng - minLng) * s,
+                y = oy + (maxLat - p.lat) * s,
             )
         }
     }

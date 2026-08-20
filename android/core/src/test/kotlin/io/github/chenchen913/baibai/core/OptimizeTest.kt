@@ -108,14 +108,15 @@ class OptimizeTest {
         r.addPoint(far(150.0), 5.0, T0 + 2100)
         r.pause(listOf(fix(far(200.0))), T0 + 10_000) // B（慢走 8s）
         r.resume(T0 + 11_000)
-        r.addPoint(far(150.0), 5.0, T0 + 11_100)
+        r.addPoint(far(156.0), 5.0, T0 + 11_100) // R7 后重复坐标不入库——错开 6m 模拟真实走动
         r.pause(listOf(fix(far(108.0))), T0 + 12_000) // 回 A（快走 1s）
         r.resume(T0 + 13_000)
         r.addPoint(far(150.0), 5.0, T0 + 13_100)
         r.pause(listOf(fix(far(200.0))), T0 + 13_500) // 再 B（0.5s）
-        r.resume(T0 + 14_000)
-        r.addPoint(HOME, 5.0, T0 + 14_100)
-        r.finish(listOf(fix(HOME)), T0 + 15_000)
+        // R7：跳变点（<2s 且 >100m）不再入库——回家点与 far(150) 需隔 ≥2s，否则 B→home 边丢点
+        r.resume(T0 + 15_000)
+        r.addPoint(HOME, 5.0, T0 + 15_100)
+        r.finish(listOf(fix(HOME)), T0 + 16_000)
         val s = r.snapshot()
 
         val edges = Track.buildEdges(s)

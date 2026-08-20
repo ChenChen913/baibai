@@ -143,4 +143,33 @@ class RecorderHubTest {
         RecorderHub.handleGpsError(GpsErrorKind.TIMEOUT)
         // 无崩溃即通过（错误仅发送 toast 事件）
     }
+
+    @Test
+    fun `R7 结束保存后消费 FINISHED 快照：记录页可再次开始拜年`() {
+        RecorderHub.startPressed()
+        fake.push(HOME)
+        fake.push(HOME)
+        fake.push(HOME)
+        fake.push(far(50.0))
+        RecorderHub.finishPressed(force = true)
+        // 结束瞬间：session 仍是 FINISHED 快照（供 UI 跳转回顾页），recorder 已清空
+        assertEquals(SessionState.FINISHED, RecorderHub.session.value?.state)
+        assertNull(RecorderHub.recorder)
+        assertEquals(1, RecorderHub.store.listSessions().size)
+
+        // UI 跳转回顾页后调用 consume（MainActivity LaunchedEffect）→ 记录页恢复「开始拜年」
+        RecorderHub.consumeFinishedSession()
+        assertNull(RecorderHub.session.value)
+
+        // 立即可开始第二场（一天可拜多次年）
+        RecorderHub.startPressed()
+        fake.push(HOME)
+        fake.push(HOME)
+        fake.push(HOME)
+        assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
+        RecorderHub.finishPressed(force = true)
+        assertEquals(2, RecorderHub.store.listSessions().size)
+        RecorderHub.consumeFinishedSession()
+        assertNull(RecorderHub.session.value)
+    }
 }

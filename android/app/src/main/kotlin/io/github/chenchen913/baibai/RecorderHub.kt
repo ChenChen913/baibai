@@ -281,6 +281,18 @@ object RecorderHub {
         _finishTooFar.value = null
     }
 
+    /**
+     * R7：结束保存成功并跳转回顾页后调用——清掉 FINISHED 快照，记录页恢复「开始拜年」按钮。
+     * 真机主诉：拜完一次年回记录页，主按钮永远消失（一天可拜多次年、一年拜十次年）。
+     * 网页版无此问题（complete() 置 recorder=null，render(null) 即 IDLE）；
+     * 安卓 _session 残留 FINISHED 快照导致 RecordScreen 按 FINISHED 分支不渲染按钮，此处对齐网页版语义。
+     */
+    fun consumeFinishedSession() {
+        if (recorder == null && _session.value?.state == io.github.chenchen913.baibai.core.model.SessionState.FINISHED) {
+            _session.value = null
+        }
+    }
+
     fun setMode(mode: Mode) {
         val r = recorder ?: return
         r.setMode(mode, nowMs())

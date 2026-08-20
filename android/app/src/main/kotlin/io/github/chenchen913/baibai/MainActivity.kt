@@ -132,10 +132,13 @@ fun AppRoot() {
         crashMsg?.let { toast = ToastMsg(++toastSeq, it) }
     }
 
-    // 结束拜年后自动进入回顾页（沿用网页版行为）
+    // 结束拜年后自动进入回顾页（沿用网页版行为）；
+    // R7：跳转后立即消费 FINISHED 快照——记录页恢复「开始拜年」按钮（一天可拜多次年），
+    // 否则 _session 残留 FINISHED，从回顾页返回记录页时主按钮永远消失
     LaunchedEffect(session) {
         if (session?.state == io.github.chenchen913.baibai.core.model.SessionState.FINISHED && screen is Screen.Record) {
             screen = Screen.Review(session!!)
+            RecorderHub.consumeFinishedSession()
         }
     }
 

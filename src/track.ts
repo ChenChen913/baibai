@@ -78,6 +78,8 @@ export interface Bounds {
   maxLng: number;
 }
 
+export const MIN_VIEW_SPAN_M = 60; // R7：回放/回顾投影最小跨度——静止小点团不得被放大充满视口
+
 export function boundsOf(pts: LatLng[]): Bounds | null {
   if (pts.length === 0) return null;
   let minLat = Infinity;
@@ -93,7 +95,11 @@ export function boundsOf(pts: LatLng[]): Bounds | null {
   return { minLat, maxLat, minLng, maxLng };
 }
 
-/** 等比投影到视口（北在上、留白 10%），全部点落在 [0,w]×[0,h] 内 */
+/**
+ * 等比投影到视口（北在上、留白 10%），全部点落在 [0,w]×[0,h] 内。
+ * R7：跨度下限 MIN_VIEW_SPAN_M（60m）——静止小点团（几米抖动范围）不得被放大充满视口；
+ * 仅在任一方向跨度低于下限时以实际中心扩展，大跨度场景投影结果与旧版逐位一致。
+ */
 export function projectToView(
   pts: LatLng[],
   w: number,
@@ -102,8 +108,25 @@ export function projectToView(
 ): { x: number; y: number }[] {
   const b = boundsOf(pts);
   if (!b) return [];
-  const spanLat = Math.max(b.maxLat - b.minLat, 1e-9);
-  const spanLng = Math.max(b.maxLng - b.minLng, 1e-9);
+  // 米→度换算（等距圆柱近似）：纬度 1° ≈ 111320m；经度 1° ≈ 111320·cos(纬度)
+  const cLat = (b.maxLat + b.minLat) / 2;
+  const cLng = (b.maxLng + b.minLng) / 2;
+  const rad = Math.PI / 180;
+  const minSpanLat = MIN_VIEW_SPAN_M / 111320;
+  const minSpanLng = MIN_VIEW_SPAN_M / (111320 * Math.cos(cLat * rad));
+  let spanLat = Math.max(b.maxLat - b.minLat, 1e-9);
+  let spanLng = Math.max(b.maxLng - b.minLng, 1e-9);
+  let minLat = b.minLat;
+  let maxLat = b.maxLat;
+  let minLng = b.minLng;
+  if (spanLat < minSpanLat || spanLng < minSpanLng) {
+    // 小点团：以实际 bounds 中心扩展跨度（点团居中），不再放大到充满视口
+    spanLat = Math.max(spanLat, minSpanLat);
+    spanLng = Math.max(spanLng, minSpanLng);
+    minLat = cLat - spanLat / 2;
+    maxLat = cLat + spanLat / 2;
+    minLng = cLng - spanLng / 2;
+  }
   const usableW = w * (1 - 2 * pad);
   const usableH = h * (1 - 2 * pad);
   const s = Math.min(usableW / spanLng, usableH / spanLat);
@@ -112,8 +135,8 @@ export function projectToView(
   const ox = (w - drawW) / 2;
   const oy = (h - drawH) / 2;
   return pts.map((p) => ({
-    x: ox + (p.lng - b.minLng) * s,
-    y: oy + (b.maxLat - p.lat) * s,
+    x: ox + (p.lng - minLng) * s,
+    y: oy + (maxLat - p.lat) * s,
   }));
 }
 

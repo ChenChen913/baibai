@@ -233,11 +233,39 @@ describe('跳变防护（D22 最小版）', () => {
     expect(p1.jump).toBe(true);
     const p2 = r.addPoint(far(600), 5, T0 + 5000);
     expect(p2.jump).toBeUndefined();
+    // R7：跳变点直接丢弃——返回值带标记，但 points 只含 HOME 与 far(600)
+    expect(r.snapshot.points).toHaveLength(2);
   });
 
   it('非 WALKING 状态记点抛错', () => {
     const r = new RecorderState();
     expect(() => r.addPoint(HOME, 5, T0)).toThrow(/非法转移/);
+  });
+});
+
+describe('静止过滤（R7 真机修复）', () => {
+  it('距上一入库点 <5m 的抖动不入库，基准是入库点而非上一个 fix', () => {
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    r.addPoint(far(3), 5, T0 + 1000); // 3m 抖动 → 不入库
+    r.addPoint(far(4), 5, T0 + 2000); // 基准仍是 HOME（上一入库点）：4m → 不入库
+    expect(r.snapshot.points).toHaveLength(1);
+    r.addPoint(far(6), 5, T0 + 3000); // 6m ≥ 5m → 入库
+    expect(r.snapshot.points).toHaveLength(2);
+    r.addPoint(far(9), 5, T0 + 4000); // 距 far(6) 仅 3m → 不入库（累计不破闸）
+    expect(r.snapshot.points).toHaveLength(2);
+  });
+
+  it('坐着不动 2 分钟：抖动点全被过滤，轨迹不长线', () => {
+    // 真机主诉复现：静止时 GPS 每 2s 抖动 ±4m——旧版全收，回放拉出多条线段的复杂轨迹
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    let t = T0;
+    for (let i = 1; i <= 60; i++) {
+      t += 2000;
+      r.addPoint(far(Math.abs(Math.sin(i)) * 4), 5, t);
+    }
+    expect(r.snapshot.points).toHaveLength(1);
   });
 });
 

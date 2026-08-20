@@ -260,12 +260,42 @@ class RecorderStateTest {
         assertEquals(true, p1.jump)
         val p2 = r.addPoint(far(600.0), 5.0, T0 + 5000)
         assertNull(p2.jump)
+        // R7：跳变点直接丢弃——返回值带标记，但 points 只含 HOME 与 far(600)
+        assertEquals(2, r.snapshot().points.size)
     }
 
     @Test
     fun `非 WALKING 状态记点抛错`() {
         val r = RecorderState.fresh()
         assertThrows(IllegalStateException::class.java) { r.addPoint(HOME, 5.0, T0) }
+    }
+
+    // ---------- 静止过滤（R7 真机修复） ----------
+
+    @Test
+    fun `R7 距上一入库点 5m 内的抖动不入库，基准是入库点而非上一个 fix`() {
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        r.addPoint(far(3.0), 5.0, T0 + 1000) // 3m 抖动 → 不入库
+        r.addPoint(far(4.0), 5.0, T0 + 2000) // 基准仍是 HOME（上一入库点）：4m → 不入库
+        assertEquals(1, r.snapshot().points.size)
+        r.addPoint(far(6.0), 5.0, T0 + 3000) // 6m ≥ 5m → 入库
+        assertEquals(2, r.snapshot().points.size)
+        r.addPoint(far(9.0), 5.0, T0 + 4000) // 距 far(6) 仅 3m → 不入库（累计不破闸）
+        assertEquals(2, r.snapshot().points.size)
+    }
+
+    @Test
+    fun `R7 坐着不动 2 分钟：抖动点全被过滤，轨迹不长线`() {
+        // 真机主诉复现：静止时 GPS 每 2s 抖动 ±4m——旧版全收，回放拉出多条线段的复杂轨迹
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        var t = T0
+        for (i in 1..60) {
+            t += 2000
+            r.addPoint(far(kotlin.math.abs(kotlin.math.sin(i.toDouble())) * 4), 5.0, t)
+        }
+        assertEquals(1, r.snapshot().points.size)
     }
 
     // ---------- 出行方式（D19 R1） ----------
