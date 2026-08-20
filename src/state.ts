@@ -49,7 +49,9 @@ export const FINISH_OK_M = 20; // 结束拜年自动判定半径：GPS 民码误
 export const GOOD_ACC_M = 50; // ≤50m 精度的 fix 才参与中位数
 export const JUMP_DIST_M = 100; // D22：跳变防护阈值
 export const JUMP_DT_MS = 2000;
-export const MIN_MOVE_M = 5; // R7：静止最小位移——距上一入库点不足此值不入点（GPS 静止抖动 3~10m，全收会画出"复杂轨迹"）
+export const MIN_MOVE_M = 5; // R7/R8：静止位移门槛基线——GPS 报多少米精度，就至少走够多少米才入库
+export const MOVE_THR_MAX_M = 30; // R8：精度自适应门槛上限——acc 再差也保证真实走动每 ~30m 留一个点
+export const SMOOTH_WINDOW = 5; // R8：中位数平滑窗口大小——吸收振荡抖动与单点坏值
 
 export type Action =
   | { type: 'start' }
@@ -74,6 +76,8 @@ export class RecorderState {
   private s: SessionData;
   private actions: Action[] = [];
   private segCounter = 0;
+  // R8：中位数平滑窗口（运行时态，不入快照/检查点——崩溃恢复后从空窗重启，无碍）
+  private smoothBuf: LatLng[] = [];
 
   constructor(init: Partial<SessionData> = {}) {
     this.s = {
@@ -129,6 +133,7 @@ export class RecorderState {
     this.s.home = home;
     this.s.state = 'WALKING';
     this.s.finished = false;
+    this.smoothBuf = []; // R8：新会话平滑窗口从空开始
     this.actions.push({ type: 'start' });
     this.touch(now);
   }
@@ -193,6 +198,7 @@ export class RecorderState {
     v.leaveT = now;
     this.segCounter += 1;
     this.s.state = 'WALKING';
+    this.smoothBuf = []; // R8：新段平滑窗口从空开始（上一段的旧 fix 不拖慢本段起步）
     this.actions.push({ type: 'resume' });
     this.touch(now);
   }
@@ -236,28 +242,49 @@ export class RecorderState {
 
   /**
    * 记录轨迹点（仅 WALKING）。
-   * R7 两道入口闸门（真机主诉：人坐着不动，回放却拉出复杂轨迹）：
-   * ① 跳变丢弃：2s 内位移 >100m（180km/h，人力不可达，必为 GPS 坏点）不入库，
-   *    返回值带 jump 标记供调用方感知——回顾页「跳变点列表」因此恒空，属预期；
-   * ② 静止过滤：距上一入库点 <5m（GPS 静止抖动 3~10m）不入库——人不动就不长轨迹。
-   * 注意过滤基准是「上一入库点」而非上一个 fix：连续小幅抖动累计不破闸。
+   * R8 三道入口闸门（真机主诉第二轮：静止 1~2 分钟仍拉出小段偏移轨迹）。
+   * 根因：R7 固定 5m 门槛小于真实静止抖动幅度（室内散布直径 10~40m）——
+   * 振荡抖动一旦越过 5m 就入库，之后基准跟着抖动走，慢慢拉出小圈。
+   *
+   * ① 跳变丢弃（R7 原样）：距上一入库点 2s 内 >100m（人力不可达，必为 GPS 坏点）
+   *    直接丢弃且不进平滑窗口（防污染中位数），返回值带 jump 标记；
+   * ② 中位数平滑（R8 新增）：原始 fix 进入滑动窗口（SMOOTH_WINDOW 个），
+   *    入库候选 = 窗口各分量中位数（样本 ≥3 才可信，不足用原始值）——
+   *    振荡抖动的中位数恒在抖动团中心，天然不长线；单点坏值被窗口吸收；
+   * ③ 静止过滤（R8 精度自适应）：门槛 = min(max(5m, acc), 30m)——
+   *    GPS 报多少米精度，就要求稳定估计至少走够多少米才入库，
+   *    坐在室内（acc 15~40m）时门槛抬到 15~30m，抖动全滤；acc 上限 30m
+   *    保证真实走动最差也每 ~30m 留一个点，轨迹形状不丢。
+   * ④ 入库后窗口重置（R8 新增）：新入库点成为下一轮平滑锚点，防止旧抖动残留拖慢起步。
    */
   addPoint(pos: LatLng, acc: number, now: number): TrackPoint {
     if (this.s.state !== 'WALKING') {
       throw new Error('非法转移：仅移动中记录轨迹点');
     }
-    const p: TrackPoint = { t: now, pos, acc, seg: `seg${this.segCounter}` };
+    const seg = `seg${this.segCounter}`;
     const prev = this.s.points[this.s.points.length - 1];
+    // ① 跳变点：不入库、不进平滑窗口
+    if (
+      prev &&
+      now - prev.t < JUMP_DT_MS &&
+      haversineM(prev.pos, pos) > JUMP_DIST_M
+    ) {
+      return { t: now, pos, acc, seg, jump: true };
+    }
+    // ② 原始 fix 进滑动窗口，取中位数为入库候选
+    this.smoothBuf.push(pos);
+    if (this.smoothBuf.length > SMOOTH_WINDOW) this.smoothBuf.shift();
+    const cand = this.smoothBuf.length >= 3 ? medianPos(this.smoothBuf)! : pos;
+    const p: TrackPoint = { t: now, pos: cand, acc, seg };
     if (prev) {
-      const d = haversineM(prev.pos, pos);
-      if (now - prev.t < JUMP_DT_MS && d > JUMP_DIST_M) {
-        return { ...p, jump: true }; // ① 跳变点直接丢弃（不入库）
-      }
-      if (d < MIN_MOVE_M) {
-        return { ...p }; // ② 静止抖动不入库
+      // ③ 精度自适应静止门槛
+      const thr = Math.min(Math.max(MIN_MOVE_M, acc), MOVE_THR_MAX_M);
+      if (haversineM(prev.pos, cand) < thr) {
+        return p; // 稳定估计未走出门槛 → 不入库
       }
     }
     this.s.points.push(p);
+    this.smoothBuf = [cand]; // ④ 入库后窗口重置
     return p;
   }
 
@@ -280,6 +307,7 @@ export class RecorderState {
         this.s.points = [];
         this.s.state = 'IDLE';
         this.segCounter = 0;
+        this.smoothBuf = []; // R8：平滑窗口一并清空
         break;
       case 'pause': {
         this.s.visits.pop();

@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 import kotlin.math.PI
 import kotlin.math.roundToInt
 
-/** 对应网页版 tests/state.test.ts（23 项，逐位对齐） */
+/** 对应网页版 tests/state.test.ts（25 项，逐位对齐） */
 class RecorderStateTest {
 
     companion object {
@@ -270,23 +270,26 @@ class RecorderStateTest {
         assertThrows(IllegalStateException::class.java) { r.addPoint(HOME, 5.0, T0) }
     }
 
-    // ---------- 静止过滤（R7 真机修复） ----------
+    // ---------- 静止过滤（R8 真机修复） ----------
 
     @Test
-    fun `R7 距上一入库点 5m 内的抖动不入库，基准是入库点而非上一个 fix`() {
+    fun `R8 平滑窗口：中位数稳定估计走够门槛才入库，入库点即中位数`() {
         val r = started()
         r.addPoint(HOME, 5.0, T0)
-        r.addPoint(far(3.0), 5.0, T0 + 1000) // 3m 抖动 → 不入库
-        r.addPoint(far(4.0), 5.0, T0 + 2000) // 基准仍是 HOME（上一入库点）：4m → 不入库
+        r.addPoint(far(3.0), 5.0, T0 + 1000) // 3m 抖动：原始候选 <5m → 不入库
+        r.addPoint(far(4.0), 5.0, T0 + 2000) // 窗口≥3：中位数 far(3)，距 HOME 3m → 不入库
+        r.addPoint(far(6.0), 5.0, T0 + 3000) // 窗口 [0,3,4,6] 中位数仍 far(3) → 不入库
+        r.addPoint(far(9.0), 5.0, T0 + 4000) // 窗口 [0,3,4,6,9] 中位数 far(4) → 仍不足 5m
         assertEquals(1, r.snapshot().points.size)
-        r.addPoint(far(6.0), 5.0, T0 + 3000) // 6m ≥ 5m → 入库
+        r.addPoint(far(12.0), 5.0, T0 + 5000) // 窗口滑至 [3,4,6,9,12]：中位数 far(6) ≥5m → 入库
         assertEquals(2, r.snapshot().points.size)
-        r.addPoint(far(9.0), 5.0, T0 + 4000) // 距 far(6) 仅 3m → 不入库（累计不破闸）
-        assertEquals(2, r.snapshot().points.size)
+        assertEquals(far(6.0), r.snapshot().points[1].pos) // 入库的是中位数（稳定估计）
+        r.addPoint(far(15.0), 5.0, T0 + 6000) // 入库后窗口重置：原始候选 far(15) 距 far(6) 9m → 入库
+        assertEquals(3, r.snapshot().points.size)
     }
 
     @Test
-    fun `R7 坐着不动 2 分钟：抖动点全被过滤，轨迹不长线`() {
+    fun `R8 坐着不动 2 分钟：抖动点全被过滤，轨迹不长线`() {
         // 真机主诉复现：静止时 GPS 每 2s 抖动 ±4m——旧版全收，回放拉出多条线段的复杂轨迹
         val r = started()
         r.addPoint(HOME, 5.0, T0)
@@ -296,6 +299,38 @@ class RecorderStateTest {
             r.addPoint(far(kotlin.math.abs(kotlin.math.sin(i.toDouble())) * 4), 5.0, t)
         }
         assertEquals(1, r.snapshot().points.size)
+    }
+
+    @Test
+    fun `R8 室内静止（±15m 振荡、精度 25m）：门槛随精度抬高，零入库`() {
+        // 真机主诉第二轮：坐 1~2 分钟仍拉出小段偏移——R7 固定 5m 门槛挡不住室内大抖动；
+        // R8 门槛 = min(max(5, acc), 30) = 25m，±15m 振荡全滤
+        val r = started()
+        r.addPoint(HOME, 25.0, T0)
+        var t = T0
+        for (i in 1..60) {
+            t += 2000
+            r.addPoint(if (i % 2 == 0) far(15.0) else far(-15.0), 25.0, t)
+        }
+        assertEquals(1, r.snapshot().points.size)
+    }
+
+    @Test
+    fun `R8 静止后真实走动（每 fix 3m）：轨迹正常记录不被误杀`() {
+        val r = started()
+        r.addPoint(HOME, 5.0, T0)
+        r.addPoint(far(3.0), 5.0, T0 + 1000) // 静止抖动
+        r.addPoint(far(4.0), 5.0, T0 + 2000)
+        var t = T0 + 2000
+        var m = 7.0
+        while (m <= 40.0) {
+            t += 2000
+            r.addPoint(far(m), 5.0, t) // 起步：每 2s 前进 3m
+            m += 3.0
+        }
+        val pts = r.snapshot().points
+        assertTrue(pts.size >= 3)
+        assertTrue(io.github.chenchen913.baibai.core.geo.Geo.haversineM(HOME, pts.last().pos) > 25) // 末点已远离 Home
     }
 
     // ---------- 出行方式（D19 R1） ----------

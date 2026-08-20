@@ -5,7 +5,7 @@ import {
   HOME_ID,
   MERGE_THRESHOLD_M,
 } from '../src/state.js';
-import { Fix } from '../src/geo.js';
+import { Fix, haversineM } from '../src/geo.js';
 
 const HOME = { lat: 31.0, lng: 121.0 };
 const R = 6371000;
@@ -243,17 +243,20 @@ describe('跳变防护（D22 最小版）', () => {
   });
 });
 
-describe('静止过滤（R7 真机修复）', () => {
-  it('距上一入库点 <5m 的抖动不入库，基准是入库点而非上一个 fix', () => {
+describe('静止过滤（R8 真机修复）', () => {
+  it('R8 平滑窗口：中位数稳定估计走够门槛才入库，入库点即中位数', () => {
     const r = started();
     r.addPoint(HOME, 5, T0);
-    r.addPoint(far(3), 5, T0 + 1000); // 3m 抖动 → 不入库
-    r.addPoint(far(4), 5, T0 + 2000); // 基准仍是 HOME（上一入库点）：4m → 不入库
+    r.addPoint(far(3), 5, T0 + 1000); // 3m 抖动：原始候选 <5m → 不入库
+    r.addPoint(far(4), 5, T0 + 2000); // 窗口≥3：中位数 far(3)，距 HOME 3m → 不入库
+    r.addPoint(far(6), 5, T0 + 3000); // 窗口 [0,3,4,6] 中位数仍 far(3) → 不入库
+    r.addPoint(far(9), 5, T0 + 4000); // 窗口 [0,3,4,6,9] 中位数 far(4) → 仍不足 5m
     expect(r.snapshot.points).toHaveLength(1);
-    r.addPoint(far(6), 5, T0 + 3000); // 6m ≥ 5m → 入库
+    r.addPoint(far(12), 5, T0 + 5000); // 窗口滑至 [3,4,6,9,12]：中位数 far(6) ≥5m → 入库
     expect(r.snapshot.points).toHaveLength(2);
-    r.addPoint(far(9), 5, T0 + 4000); // 距 far(6) 仅 3m → 不入库（累计不破闸）
-    expect(r.snapshot.points).toHaveLength(2);
+    expect(r.snapshot.points[1].pos).toEqual(far(6)); // 入库的是中位数（稳定估计）
+    r.addPoint(far(15), 5, T0 + 6000); // 入库后窗口重置：原始候选 far(15) 距 far(6) 9m → 入库
+    expect(r.snapshot.points).toHaveLength(3);
   });
 
   it('坐着不动 2 分钟：抖动点全被过滤，轨迹不长线', () => {
@@ -266,6 +269,34 @@ describe('静止过滤（R7 真机修复）', () => {
       r.addPoint(far(Math.abs(Math.sin(i)) * 4), 5, t);
     }
     expect(r.snapshot.points).toHaveLength(1);
+  });
+
+  it('R8 室内静止（±15m 振荡、精度 25m）：门槛随精度抬高，零入库', () => {
+    // 真机主诉第二轮：坐 1~2 分钟仍拉出小段偏移——R7 固定 5m 门槛挡不住室内大抖动；
+    // R8 门槛 = min(max(5, acc), 30) = 25m，±15m 振荡全滤
+    const r = started();
+    r.addPoint(HOME, 25, T0);
+    let t = T0;
+    for (let i = 1; i <= 60; i++) {
+      t += 2000;
+      r.addPoint(i % 2 === 0 ? far(15) : far(-15), 25, t);
+    }
+    expect(r.snapshot.points).toHaveLength(1);
+  });
+
+  it('R8 静止后真实走动（每 fix 3m）：轨迹正常记录不被误杀', () => {
+    const r = started();
+    r.addPoint(HOME, 5, T0);
+    r.addPoint(far(3), 5, T0 + 1000); // 静止抖动
+    r.addPoint(far(4), 5, T0 + 2000);
+    let t = T0 + 2000;
+    for (let m = 7; m <= 40; m += 3) {
+      t += 2000;
+      r.addPoint(far(m), 5, t); // 起步：每 2s 前进 3m
+    }
+    const pts = r.snapshot.points;
+    expect(pts.length).toBeGreaterThanOrEqual(3);
+    expect(haversineM(HOME, pts[pts.length - 1].pos)).toBeGreaterThan(25); // 末点已远离 Home
   });
 });
 

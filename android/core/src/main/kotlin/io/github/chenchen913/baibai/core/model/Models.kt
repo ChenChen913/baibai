@@ -11,7 +11,9 @@ object Constants {
     const val GOOD_ACC_M = 50.0
     const val JUMP_DIST_M = 100.0
     const val JUMP_DT_MS = 2000L
-    const val MIN_MOVE_M = 5.0 // R7：静止最小位移——距上一入轨迹点不足此值不入点（GPS 静止抖动 3~10m，全收会画出"复杂轨迹"）
+    const val MIN_MOVE_M = 5.0 // R7/R8：静止位移门槛基线——GPS 报多少米精度，就至少走够多少米才入库
+    const val MOVE_THR_MAX_M = 30.0 // R8：精度自适应门槛上限——acc 再差也保证真实走动每 ~30m 留一个点
+    const val SMOOTH_WINDOW = 5 // R8：中位数平滑窗口大小——吸收振荡抖动与单点坏值
     const val MIN_VIEW_SPAN_M = 60.0 // R7：回放/回顾投影最小跨度——静止小点团不得被放大充满视口
     const val R = 6371000.0
 }
