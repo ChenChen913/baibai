@@ -74,8 +74,10 @@ object RecorderHub {
     private var flushTimerStarted = false
     private var lastSessionEmit = 0L // M-5：定位 fix 的 session 快照节流（5s）
 
-    // 首个定位缓冲：攒 3 个高精度 fix（≤ GOOD_ACC_M）或 10 秒超时取中位数定 Home。
-    // 只数任意 3 个 fix 会把网络粗定位点（GCJ-02/acc 大）定成 Home，后续 GPS 点与 Home 偏离数百米（定位不准根因之二）
+    // 首个定位缓冲：攒 3 个高精度 GPS fix（或 10 秒超时）→ 中位数定 Home。
+    // 网络点坐标系不可靠（国产 ROM 返回 GCJ-02）：混入会把 Home 定错坐标系，
+    // 与后续 GPS 轨迹点相距 300~600m——人不动也画出一条长直线（R6 真机根因）；
+    // 故就绪条件与 Home 采样都优先 GPS 点，仅 10s 内拿不到 GPS 时才用网络点兜底（室内）
     private val pendingFixes = mutableListOf<Fix>()
     private var pendingStartAt = 0L
 
@@ -294,16 +296,19 @@ object RecorderHub {
         _gpsAcc.value = f.acc
         val r = recorder
         if (r == null && _waiting.value) {
-            // 攒 3 个高精度 fix（或 10 秒超时）→ 中位数定 Home；
-            // 优先等 GPS 精点，避免网络粗定位点（坐标系/精度都不可靠）定成 Home
+            // 攒 3 个高精度 GPS fix（或 10 秒超时）→ 中位数定 Home；
+            // src=="net" 的网络点坐标系不可靠（GCJ-02），不计入就绪数、不参与 Home 中位数，
+            // 仅当 10s 内拿不到任何 GPS 点时才作为室内兜底使用
             pendingFixes.add(f)
             val t = nowMs()
-            val goodCount = pendingFixes.count { it.acc <= Constants.GOOD_ACC_M }
-            val ready = goodCount >= 3 || (pendingFixes.isNotEmpty() && t - pendingStartAt >= 10_000)
+            val gpsFixes = pendingFixes.filter { it.src != "net" }
+            val goodGps = gpsFixes.count { it.acc <= Constants.GOOD_ACC_M }
+            val ready = goodGps >= 3 || (pendingFixes.isNotEmpty() && t - pendingStartAt >= 10_000)
             if (ready) {
+                val homeFixes = if (gpsFixes.isNotEmpty()) gpsFixes else pendingFixes
                 val fresh = RecorderState.fresh(_bizDate.value)
                 try {
-                    fresh.start(pendingFixes.toList(), t, f)
+                    fresh.start(homeFixes.toList(), t, f)
                 } catch (e: Exception) {
                     pendingFixes.clear()
                     emit(e.message ?: "定位启动失败")

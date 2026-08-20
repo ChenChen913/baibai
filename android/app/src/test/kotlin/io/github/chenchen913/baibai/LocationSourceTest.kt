@@ -17,9 +17,9 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * 双源坐标系网关回归测试（定位不准根因）：
- * 国产 ROM 网络定位返回 GCJ-02，GPS 返回 WGS-84，混入同一缓冲会把 Home 定错坐标系，
- * 后续 GPS 点与 Home 偏离 300~600m。网关策略：GPS 点到达后 8s 内丢弃网络点。
+ * 双源坐标系网关回归测试（定位不准根因，R6 加固）：
+ * 国产 ROM 网络定位返回 GCJ-02，GPS 返回 WGS-84，混入同一缓冲会把 Home 定错坐标系、
+ * 轨迹混出长直线（人不动也跑数百米）。网关策略（R6）：GPS 到过一次后网络点永久拒绝。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -79,7 +79,7 @@ class LocationSourceTest {
     }
 
     @Test
-    fun `GPS 到达后 8 秒内网络点被丢弃（防 GCJ-02 混入）`() {
+    fun `GPS 到达后网络点被丢弃（防 GCJ-02 混入）`() {
         push(LocationManager.GPS_PROVIDER, 36.7, 119.1, 8f)
         // 网络点（模拟国产 ROM 的 GCJ-02 偏移点）必须被网关拦截
         push(LocationManager.NETWORK_PROVIDER, 36.704, 119.105, 30f)
@@ -88,11 +88,22 @@ class LocationSourceTest {
     }
 
     @Test
-    fun `GPS 静默超过宽限窗口后网络点恢复放行（室内兜底）`() {
+    fun `GPS 到过一次后网络点永久拒绝（堵住旧 8s 窗口漏洞）`() {
         push(LocationManager.GPS_PROVIDER, 36.7, 119.1, 8f)
-        nowMs += 9_000 // 推进注入时钟越过 8s 宽限窗口
+        nowMs += 60_000 // 即使 GPS 长时间静默，也不允许 GCJ-02 网络点混回（宁缺点不混系）
         push(LocationManager.NETWORK_PROVIDER, 36.701, 119.101, 50f)
-        assertEquals(2, cb.fixes.size)
+        assertEquals(1, cb.fixes.size)
+    }
+
+    @Test
+    fun `首个 GPS 点清掉已进缓冲的网络点（坐标系纯净化）`() {
+        // GPS 冷启动慢：网络点先到并进了缓冲（旧版会被拿去定 Home）
+        push(LocationManager.NETWORK_PROVIDER, 36.704, 119.105, 30f)
+        assertEquals(1, src.recent(16).size)
+        push(LocationManager.GPS_PROVIDER, 36.7, 119.1, 8f)
+        val recent = src.recent(16)
+        assertEquals(1, recent.size)
+        assertEquals("gps", recent[0].src)
     }
 
     @Test

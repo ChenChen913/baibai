@@ -27,12 +27,13 @@ interface LocationSource {
 /**
  * 系统 LocationManager（GPS 优先，1s 间隔；零 Key 零依赖，先跑通全链路）
  *
- * 双源坐标系网关（定位不准根因修复）：
+ * 双源坐标系网关（定位不准根因修复，R6 加固）：
  * 国产 ROM 的网络定位（WiFi/基站）由高德/百度服务提供，返回 GCJ-02 坐标；
  * GPS 返回 WGS-84。两源混入同一缓冲会导致：
  * - 首定 Home 用网络点（GPS 冷启动慢）→ Home 坐标系错，后续 GPS 点与 Home 相距 300~600m；
- * - 地图层对全部点做 WGS→GCJ 转换，网络点被二次转换 → 标记偏离道路约 500m。
- * 策略：GPS 点到达后 8s 内不再接受网络点；无 GPS 时才用网络点快速首定/室内兜底。
+ * - 轨迹混入两套坐标系的点 → 人不动也画出一条长直线（真机 v1.0.3 复现）。
+ * 策略（R6）：GPS 到过一次后网络点**永久**拒绝（旧 8s 宽限窗口有漏洞：首个 GPS 点到达前、
+ * GPS 静默超窗后的网络点仍会混入）；无 GPS 时才用网络点快速首定/室内兜底。
  */
 class SystemLocationSource(
     private val context: Context,
@@ -44,9 +45,11 @@ class SystemLocationSource(
     private var running = false
     private var cb: LocationCallbacks? = null
 
-    /** 最近一次 GPS 点到达时刻；网络点网关依据（volatile：定位回调在主线程，网关判断同线程，保险起见） */
+    /** 本次运行是否到过 GPS 点；到过一次后网络点（GCJ-02）永久拒绝——
+     * 旧「8s 宽限窗口」有致命漏洞：首个 GPS 点到达**前**的网络点照样进缓冲，
+     * GPS 静默超窗后网络点又混回来，两套坐标系的点各聚一团 → 人不动也画出长直线（真机复现） */
     @Volatile
-    private var lastGpsAt = 0L
+    private var everGotGps = false
 
     override val active: Boolean get() = running
     override val lastFix: Fix? get() = last
@@ -57,14 +60,23 @@ class SystemLocationSource(
         override fun onLocationChanged(loc: Location) {
             val isGps = loc.provider == LocationManager.GPS_PROVIDER
             if (isGps) {
-                lastGpsAt = clock()
+                if (!everGotGps) {
+                    everGotGps = true
+                    // 首个 GPS 点：清掉此前已进缓冲的网络点（GCJ-02），
+                    // 保证 Home 定界/暂停/结束/轨迹用的缓冲坐标系纯净（全 WGS-84）
+                    buffer.removeAll { it.src == "net" }
+                }
             } else {
-                // 网络点网关：GPS 近期有点则丢弃（防 GCJ-02 混入 WGS-84 缓冲）；
+                // 网络点网关：GPS 到过一次即永久拒绝（防 GCJ-02 混入 WGS-84）；
                 // 基站粗定位（acc > 300m）无参考价值，直接丢弃
-                if (lastGpsAt > 0 && clock() - lastGpsAt < GPS_GRACE_MS) return
+                if (everGotGps) return
                 if (loc.accuracy > NET_MAX_ACC_M) return
             }
-            val f = Fix(LatLng(loc.latitude, loc.longitude), loc.accuracy.toDouble())
+            val f = Fix(
+                LatLng(loc.latitude, loc.longitude),
+                loc.accuracy.toDouble(),
+                if (isGps) "gps" else "net",
+            )
             last = f
             buffer.addLast(f)
             while (buffer.size > 16) buffer.removeFirst()
@@ -108,7 +120,7 @@ class SystemLocationSource(
             running = true
             @Suppress("MissingPermission")
             lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let {
-                last = Fix(LatLng(it.latitude, it.longitude), it.accuracy.toDouble())
+                last = Fix(LatLng(it.latitude, it.longitude), it.accuracy.toDouble(), "gps")
             }
         } catch (e: SecurityException) {
             cb.onError(GpsErrorKind.DENIED, e.message ?: "no permission")
@@ -123,13 +135,10 @@ class SystemLocationSource(
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         lm.removeUpdates(listener)
         buffer.clear() // 与网页版 P19 一致：停定位时清空缓冲，避免恢复后 immediate pause 混入旧点
-        lastGpsAt = 0L // 网关复位：下次启动重新从"无 GPS"开始
+        everGotGps = false // 网关复位：下次启动重新从"无 GPS"开始
     }
 
     companion object {
-        /** GPS 点到达后的宽限窗口：窗口内网络点一律丢弃（防坐标系混用） */
-        private const val GPS_GRACE_MS = 8_000L
-
         /** 网络点精度上限：基站粗定位超过此值无参考价值 */
         private const val NET_MAX_ACC_M = 300.0
     }

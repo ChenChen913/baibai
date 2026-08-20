@@ -18,7 +18,7 @@ object Constants {
 data class LatLng(val lat: Double, val lng: Double)
 
 @Serializable
-data class Fix(val pos: LatLng, val acc: Double)
+data class Fix(val pos: LatLng, val acc: Double, val src: String? = null) // src："gps"/"net"（网关坐标系隔离用；null=未知/测试）
 
 @Serializable
 enum class Mode {

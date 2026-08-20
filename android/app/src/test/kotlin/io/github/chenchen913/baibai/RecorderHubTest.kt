@@ -34,8 +34,8 @@ class FakeSource(private val home: LatLng) : LocationSource {
         cb = null
     }
 
-    fun push(pos: LatLng, acc: Double = 5.0) {
-        val f = Fix(pos, acc)
+    fun push(pos: LatLng, acc: Double = 5.0, src: String? = null) {
+        val f = Fix(pos, acc, src)
         buffer.addLast(f)
         cb?.onFix(f)
     }
@@ -62,6 +62,24 @@ class RecorderHubTest {
         RecorderHub.source = fake
         RecorderHub.useForegroundService = false // 本类聚焦 Hub 逻辑，服务在 LocationServiceTest 单独测
         RecorderHub.resetForTest(clearStore = true)
+    }
+
+    @Test
+    fun `Home 定位优先 GPS 点：网络点先到不会定错坐标系（R6）`() {
+        RecorderHub.startPressed()
+        // 网络点先到（GCJ-02，模拟偏移约 500m），且 acc 不差——旧版会把它们定成 Home；
+        // 随后 GPS 高精度点到达：就绪数只认 GPS 点，Home 中位数也只取 GPS 点
+        fake.push(LatLng(HOME.lat + 0.004, HOME.lng + 0.005), 30.0, src = "net")
+        fake.push(LatLng(HOME.lat + 0.004, HOME.lng + 0.005), 30.0, src = "net")
+        fake.push(LatLng(HOME.lat + 0.004, HOME.lng + 0.005), 30.0, src = "net")
+        // 网络点不算就绪：不应已开始记录
+        assertNull(RecorderHub.recorder)
+        fake.push(HOME, 5.0, src = "gps")
+        fake.push(HOME, 5.0, src = "gps")
+        fake.push(HOME, 5.0, src = "gps")
+        assertEquals(SessionState.WALKING, RecorderHub.recorder?.currentState)
+        assertEquals(HOME, RecorderHub.recorder?.snapshot()?.home) // Home = GPS 点中位数，不受网络点影响
+        RecorderHub.finishPressed(force = true)
     }
 
     @Test
