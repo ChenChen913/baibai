@@ -97,8 +97,19 @@ private sealed interface Screen {
     data object Whitelist : Screen
     data object History : Screen
     data object Plan : Screen
-    data class Review(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
-    data class Optimize(val session: io.github.chenchen913.baibai.core.model.SessionData) : Screen
+
+    /** 回顾页：fromHistory 标记进入来源，决定「返回」落点——
+     *  历史页点开 → 返回历史页；结束复盘自动进入 → 返回记录页（可立即开始下一场） */
+    data class Review(
+        val session: io.github.chenchen913.baibai.core.model.SessionData,
+        val fromHistory: Boolean,
+    ) : Screen
+
+    /** 三线对比页：从回顾页进入，fromHistory 随来源透传（返回回顾页后返回落点不变） */
+    data class Optimize(
+        val session: io.github.chenchen913.baibai.core.model.SessionData,
+        val fromHistory: Boolean,
+    ) : Screen
 }
 
 /** 顶部轻提示（暖色胶囊，不遮底部导航/主按钮区） */
@@ -137,7 +148,8 @@ fun AppRoot() {
     // 否则 _session 残留 FINISHED，从回顾页返回记录页时主按钮永远消失
     LaunchedEffect(session) {
         if (session?.state == io.github.chenchen913.baibai.core.model.SessionState.FINISHED && screen is Screen.Record) {
-            screen = Screen.Review(session!!)
+            // 结束复盘自动进入 → fromHistory=false：返回键/返回按钮落回记录页，可立即开始下一场
+            screen = Screen.Review(session!!, fromHistory = false)
             RecorderHub.consumeFinishedSession()
         }
     }
@@ -183,8 +195,8 @@ fun AppRoot() {
         // H-1：系统返回键/手势按页面栈返回（记录页为栈底，返回键交给系统=退出）
         BackHandler(enabled = screen !is Screen.Record) {
             screen = when (val cur = screen) {
-                is Screen.Review -> Screen.History
-                is Screen.Optimize -> Screen.Review(cur.session)
+                is Screen.Review -> if (cur.fromHistory) Screen.History else Screen.Record
+                is Screen.Optimize -> Screen.Review(cur.session, cur.fromHistory)
                 else -> Screen.Record
             }
         }
@@ -224,20 +236,23 @@ fun AppRoot() {
 
             is Screen.History -> HistoryScreen(
                 onBack = { screen = Screen.Record },
-                onOpen = { s -> screen = Screen.Review(s) },
+                onOpen = { s -> screen = Screen.Review(s, fromHistory = true) },
             )
 
             is Screen.Review -> {
                 val reviewScreen = screen as Screen.Review
                 ReviewScreen(
                     initial = reviewScreen.session,
-                    onBack = { screen = Screen.History },
+                    onBack = {
+                        // 来源感知返回：历史页点开 → 回历史页；结束复盘进入 → 回记录页
+                        screen = if (reviewScreen.fromHistory) Screen.History else Screen.Record
+                    },
                     onSave = { s2 ->
                         runCatching { RecorderHub.store.saveSession(s2) }
                         // H-4：把最新编辑结果回传，保证「三线对比」与返回都用最新数据
-                        screen = Screen.Review(s2)
+                        screen = Screen.Review(s2, reviewScreen.fromHistory)
                     },
-                    onOptimize = { screen = Screen.Optimize(reviewScreen.session) },
+                    onOptimize = { screen = Screen.Optimize(reviewScreen.session, reviewScreen.fromHistory) },
                 )
             }
 
@@ -245,7 +260,7 @@ fun AppRoot() {
                 val optimizeScreen = screen as Screen.Optimize
                 OptimizeScreen(
                     session = optimizeScreen.session,
-                    onBack = { screen = Screen.Review(optimizeScreen.session) },
+                    onBack = { screen = Screen.Review(optimizeScreen.session, optimizeScreen.fromHistory) },
                 )
             }
         }

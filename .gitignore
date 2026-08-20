@@ -12,6 +12,9 @@ baibai3/
 
 # 设计稿参考副本（uxpilot 导出，不随 baibai 提交）
 baibai页面/
+uxpilot-export/
+metadata.json
+public/layout-preview.html
 
 # 外部对话记录（个人排查笔记，不入库）
 聊天记录.txt

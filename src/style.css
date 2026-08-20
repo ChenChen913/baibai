@@ -416,11 +416,6 @@ body {
   transform: scale(0.95);
 }
 
-.btn-sub-action.holding {
-  background: #fef2f2;
-  border-color: #f87171;
-}
-
 .btn-cny-cta {
   background: linear-gradient(135deg, #c8402f 0%, #e0533c 60%, #e8a23d 100%);
   border: 1px solid rgba(255, 255, 255, 0.35);

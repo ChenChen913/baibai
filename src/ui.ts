@@ -9,7 +9,6 @@ export interface UiCallbacks {
   onStart(): void;
   onPause(): void;
   onResume(): void;
-  onUndo(): void;
   onFinish(): void;
   onMode(m: Mode): void;
   onExport(): void;
@@ -27,6 +26,7 @@ export interface UiCallbacks {
   onSelectHistory?(id: string): void;
   onDemoHistory?(): void;
   onImportJson?(file: File): void;
+  onShowAllHistory?(): void;
 }
 
 export interface Ui {
@@ -201,12 +201,6 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
                 </div>
               </button>
 
-              <!-- 撤销上点 (右侧辅助键) -->
-              <button id="btn-undo" class="btn-sub-action h-13 px-3 rounded-2xl flex flex-col items-center justify-center text-stone-700 hover:text-stone-900 transition" title="撤销上一个打点">
-                <div class="text-sm text-amber-700">${ICONS.undo}</div>
-                <span class="text-[10px] font-black mt-0.5 text-stone-700">撤销上点</span>
-              </button>
-
               <!-- 导出数据 (IDLE 态下备用键) -->
               <button id="btn-export" class="btn-sub-action h-13 px-3 rounded-2xl flex flex-col items-center justify-center text-stone-700 transition" style="display:none" title="导出数据备份">
                 <div class="text-sm text-stone-700">${ICONS.download}</div>
@@ -327,6 +321,9 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
             </div>
 
             <div class="drawer-footer-actions">
+              <button id="btn-history-all" class="w-full py-2.5 rounded-xl bg-amber-500 text-white font-bold text-xs">
+                查看全部历史 · 导出/导入
+              </button>
               <button id="btn-history-return" class="w-full py-2.5 rounded-xl bg-stone-200 text-stone-700 font-bold text-xs">
                 返回实时地图
               </button>
@@ -348,40 +345,9 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   });
   $('btn-pause').addEventListener('click', () => cb.onPause());
   $('btn-resume').addEventListener('click', () => cb.onResume());
-  $('btn-undo').addEventListener('click', () => cb.onUndo());
 
-  // 结束拜年：防误触长按保护与即时响应兼备
-  const finishBtn = $('btn-finish') as HTMLButtonElement;
-  let finishHoldTimer: number | undefined;
-  let finishHolding = false;
-
-  const startHold = (): void => {
-    finishHolding = true;
-    finishBtn.classList.add('holding');
-    window.clearTimeout(finishHoldTimer);
-    finishHoldTimer = window.setTimeout(() => {
-      if (finishHolding) {
-        finishHolding = false;
-        finishBtn.classList.remove('holding');
-        launchConfetti(45);
-        cb.onFinish();
-      }
-    }, 1200);
-  };
-
-  const cancelHold = (): void => {
-    if (finishHolding) {
-      finishHolding = false;
-      finishBtn.classList.remove('holding');
-      window.clearTimeout(finishHoldTimer);
-    }
-  };
-
-  finishBtn.addEventListener('pointerdown', startHold);
-  finishBtn.addEventListener('pointerup', cancelHold);
-  finishBtn.addEventListener('pointercancel', cancelHold);
-  finishBtn.addEventListener('mouseleave', cancelHold);
-  finishBtn.addEventListener('click', () => cb.onFinish());
+  // 结束复盘：单击即触发（与安卓端一致）——距 Home >20m 时由 confirm 弹窗二次确认，防误触
+  $('btn-finish').addEventListener('click', () => cb.onFinish());
 
   // 工具栏与操作栏
   $('btn-export').addEventListener('click', () => cb.onExport());
@@ -432,6 +398,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   $('btn-plan-return').addEventListener('click', () => closeDrawer('plan'));
 
   $('btn-close-history').addEventListener('click', () => closeDrawer('history'));
+  $('btn-history-all').addEventListener('click', () => cb.onShowAllHistory?.());
   $('drawer-history-mask').addEventListener('click', () => closeDrawer('history'));
   $('btn-history-return').addEventListener('click', () => closeDrawer('history'));
 
@@ -571,7 +538,6 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     $('btn-pause').style.display = st === 'WALKING' ? 'flex' : 'none';
     $('btn-resume').style.display = st === 'PAUSED' ? 'flex' : 'none';
     $('btn-finish').style.display = st === 'WALKING' || st === 'PAUSED' ? 'flex' : 'none';
-    $('btn-undo').style.display = st === 'WALKING' || st === 'PAUSED' ? 'flex' : 'none';
     $('btn-export').style.display = st === 'IDLE' || st === 'FINISHED' ? 'flex' : 'none';
 
     // 出行方式切换

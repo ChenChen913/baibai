@@ -22,7 +22,6 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
       onStart: vi.fn(),
       onPause: vi.fn(),
       onResume: vi.fn(),
-      onUndo: vi.fn(),
       onFinish: vi.fn(),
       onMode: vi.fn(),
       onExport: vi.fn(),
@@ -44,8 +43,6 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
     expect(cb.onPause).toHaveBeenCalledTimes(1);
     click('btn-resume');
     expect(cb.onResume).toHaveBeenCalledTimes(1);
-    click('btn-undo');
-    expect(cb.onUndo).toHaveBeenCalledTimes(1);
     click('btn-finish');
     expect(cb.onFinish).toHaveBeenCalledTimes(1);
     click('btn-export');
@@ -70,7 +67,6 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
       onStart: () => {},
       onPause: () => {},
       onResume: () => {},
-      onUndo: () => {},
       onFinish: () => {},
       onMode: () => {},
       onExport: () => {},

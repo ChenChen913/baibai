@@ -263,15 +263,6 @@ function mountRecord(): Ui {
       flush();
       syncMap();
     },
-    onUndo() {
-      if (!recorder) return;
-      if (recorder.undo()) {
-        flush();
-        syncMap();
-      } else {
-        ui.toast('没有可撤销的操作');
-      }
-    },
     onFinish() {
       if (!recorder) return;
       const res = recorder.finish(gps.recent(10), now());
@@ -348,11 +339,11 @@ function mountRecord(): Ui {
     onSelectHistory(id) {
       void listSessions().then((list) => {
         const found = list.find((s) => s.id === id);
-        if (found) showReview(found);
+        if (found) showReview(found, 'record'); // 抽屉点开 → 返回记录页
       });
     },
     onDemoHistory() {
-      showReview(generateDemoSession());
+      showReview(generateDemoSession(), 'record');
     },
     onImportJson(file) {
       const reader = new FileReader();
@@ -366,6 +357,9 @@ function mountRecord(): Ui {
       };
       reader.onerror = () => ui.toast('读取文件失败');
       reader.readAsText(file);
+    },
+    onShowAllHistory() {
+      void showHistory(); // 抽屉「查看全部历史」→ 完整历史页（导出/导入/成绩单全量版）
     },
   });
   mapCtrl = mountMap(
@@ -487,7 +481,7 @@ function complete(): void {
   void clearActive();
   vibrate();
   beep();
-  showReview(saved);
+  showReview(saved, 'record'); // 刚结束复盘 → 返回键回记录页，可立即开始下一场
 }
 
 async function requestWakeLock(): Promise<void> {
@@ -520,16 +514,28 @@ async function doExport(): Promise<void> {
   URL.revokeObjectURL(a.href);
 }
 
-function showReview(sess: SessionData): void {
+/**
+ * 回顾页：from 记录进入来源，决定「返回」落点——
+ * 'record'：刚结束复盘/记录页历史抽屉点开 → 返回记录页（可立即开始下一场）
+ * 'history'：从历史页列表点开 → 返回历史页（继续翻别的场次）
+ */
+function showReview(sess: SessionData, from: 'record' | 'history'): void {
   leaveRecord();
   view = 'review';
+  const backTo = (): void => {
+    if (from === 'history') void showHistory();
+    else {
+      view = 'record';
+      ui = mountRecord();
+    }
+  };
   mountReviewView(app, sess, {
-    onBack: () => void showHistory(),
+    onBack: backTo,
     onSave: (s2) => void saveSession(s2).catch((e) => console.warn('[db]', e)),
     onOptimize: (s2) => {
       view = 'optimize';
       mountOptimizeView(app, s2, {
-        onBack: () => showReview(s2),
+        onBack: () => showReview(s2, from),
       });
     },
     loadPlan: (year) => loadPlan(year),
@@ -587,7 +593,7 @@ async function showHistory(): Promise<void> {
   });
   app.querySelector<HTMLElement>('#h-demo')!.addEventListener('click', () => {
     // 演示会话不落库，仅在内存中回放/收拾
-    showReview(generateDemoSession());
+    showReview(generateDemoSession(), 'history'); // 历史页点开 → 返回历史页
   });
   app.querySelector<HTMLElement>('#h-export')!.addEventListener('click', () => {
     void doExport().catch((e: unknown) => toast(e instanceof Error ? e.message : '导出失败'));
@@ -632,7 +638,7 @@ async function showHistory(): Promise<void> {
   list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {
     b.addEventListener('click', () => {
       const sess = sessions.find((x) => x.id === b.dataset.id);
-      if (sess) showReview(sess);
+      if (sess) showReview(sess, 'history'); // 历史页点开 → 返回历史页
     });
   });
 }

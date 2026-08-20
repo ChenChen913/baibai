@@ -258,16 +258,6 @@ object RecorderHub {
         }
     }
 
-    fun undoPressed() {
-        val r = recorder ?: return
-        if (r.undo()) {
-            flushNow()
-            _session.value = r.snapshot()
-        } else {
-            emit("没有可撤销的操作")
-        }
-    }
-
     /** 返回 TooFar 时由 UI 弹确认，确认后带 force=true 再调 */
     fun finishPressed(force: Boolean = false): FinishResult? {
         val r = recorder ?: return null

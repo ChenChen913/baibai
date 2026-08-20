@@ -50,7 +50,6 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.DatePicker
@@ -358,15 +357,6 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
                         )
 
                         SessionState.FINISHED -> Spacer(Modifier.weight(1f))
-                    }
-                    if (recording) {
-                        Spacer(Modifier.width(8.dp))
-                        SubAction(
-                            icon = Icons.Filled.RotateLeft,
-                            iconColor = DateChipText,
-                            label = "撤销上点",
-                            onClick = { RecorderHub.undoPressed() },
-                        )
                     }
                 }
                 Spacer(Modifier.height(10.dp))
