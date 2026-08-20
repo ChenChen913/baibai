@@ -9,6 +9,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -80,6 +82,24 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
             // 用完即摘，防 keyLocks 无限增长（不再整体 clear，避免并发窗口）；
             // 极窄窗口内同 key 最多出现两个锁对象 → 最多一次重复下载，瓦片内容幂等、写入原子替换，无害
             keyLocks.remove(key, lock)
+        }
+    }
+
+    /**
+     * 实时瓦片专用限时下载（地图无法显示根因修复）：
+     * 命中秒回；未命中最多等 waitMs，超时返回 null（放行 WebView 自取）但后台继续下载回填。
+     * 原同步 download 在弱网下单张阻塞最长 9s，WebView 网络线程池（4~6 个）被占满 → 地图长时间空白。
+     */
+    fun downloadFast(url: String, waitMs: Long): ByteArray? {
+        get(url)?.let { return it }
+        val fut = livePool.submit<ByteArray?> { download(url) }
+        return try {
+            fut.get(waitMs, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            null // 后台继续下载，下次同瓦片请求即命中缓存
+        } catch (e: Exception) {
+            Log.w(TAG, "实时瓦片等待异常：" + url + "，" + e.message)
+            null
         }
     }
 
@@ -172,6 +192,11 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
         /** 预载专用 3 线程池（守护线程）：并发度受限，防高德风控 */
         private val preloadPool = Executors.newFixedThreadPool(3) { r ->
             Thread(r, "baibai-tile-preload").apply { isDaemon = true }
+        }
+
+        /** 实时瓦片回填专用 2 线程池：与预载池隔离，不被 170 张预载任务饿死 */
+        private val livePool = Executors.newFixedThreadPool(2) { r ->
+            Thread(r, "baibai-tile-live").apply { isDaemon = true }
         }
     }
 }

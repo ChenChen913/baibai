@@ -24,13 +24,29 @@ interface LocationSource {
     fun stop()
 }
 
-/** 系统 LocationManager（GPS 优先，1s 间隔；零 Key 零依赖，先跑通全链路） */
-class SystemLocationSource(private val context: Context) : LocationSource {
+/**
+ * 系统 LocationManager（GPS 优先，1s 间隔；零 Key 零依赖，先跑通全链路）
+ *
+ * 双源坐标系网关（定位不准根因修复）：
+ * 国产 ROM 的网络定位（WiFi/基站）由高德/百度服务提供，返回 GCJ-02 坐标；
+ * GPS 返回 WGS-84。两源混入同一缓冲会导致：
+ * - 首定 Home 用网络点（GPS 冷启动慢）→ Home 坐标系错，后续 GPS 点与 Home 相距 300~600m；
+ * - 地图层对全部点做 WGS→GCJ 转换，网络点被二次转换 → 标记偏离道路约 500m。
+ * 策略：GPS 点到达后 8s 内不再接受网络点；无 GPS 时才用网络点快速首定/室内兜底。
+ */
+class SystemLocationSource(
+    private val context: Context,
+    private val clock: () -> Long = System::currentTimeMillis, // 可注入时钟（测试用）
+) : LocationSource {
 
     private val buffer = ArrayDeque<Fix>()
     private var last: Fix? = null
     private var running = false
     private var cb: LocationCallbacks? = null
+
+    /** 最近一次 GPS 点到达时刻；网络点网关依据（volatile：定位回调在主线程，网关判断同线程，保险起见） */
+    @Volatile
+    private var lastGpsAt = 0L
 
     override val active: Boolean get() = running
     override val lastFix: Fix? get() = last
@@ -39,6 +55,15 @@ class SystemLocationSource(private val context: Context) : LocationSource {
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
+            val isGps = loc.provider == LocationManager.GPS_PROVIDER
+            if (isGps) {
+                lastGpsAt = clock()
+            } else {
+                // 网络点网关：GPS 近期有点则丢弃（防 GCJ-02 混入 WGS-84 缓冲）；
+                // 基站粗定位（acc > 300m）无参考价值，直接丢弃
+                if (lastGpsAt > 0 && clock() - lastGpsAt < GPS_GRACE_MS) return
+                if (loc.accuracy > NET_MAX_ACC_M) return
+            }
             val f = Fix(LatLng(loc.latitude, loc.longitude), loc.accuracy.toDouble())
             last = f
             buffer.addLast(f)
@@ -98,6 +123,15 @@ class SystemLocationSource(private val context: Context) : LocationSource {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         lm.removeUpdates(listener)
         buffer.clear() // 与网页版 P19 一致：停定位时清空缓冲，避免恢复后 immediate pause 混入旧点
+        lastGpsAt = 0L // 网关复位：下次启动重新从"无 GPS"开始
+    }
+
+    companion object {
+        /** GPS 点到达后的宽限窗口：窗口内网络点一律丢弃（防坐标系混用） */
+        private const val GPS_GRACE_MS = 8_000L
+
+        /** 网络点精度上限：基站粗定位超过此值无参考价值 */
+        private const val NET_MAX_ACC_M = 300.0
     }
 }
 

@@ -9,6 +9,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import io.github.chenchen913.baibai.core.errors.GpsErrorKind
+import io.github.chenchen913.baibai.core.model.Constants
 import io.github.chenchen913.baibai.core.model.Fix
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.SessionData
@@ -73,7 +74,8 @@ object RecorderHub {
     private var flushTimerStarted = false
     private var lastSessionEmit = 0L // M-5：定位 fix 的 session 快照节流（5s）
 
-    // 首个定位缓冲：攒 3 个 fix（或 3 秒）取中位数定 Home——单个 fix 噪声大（±10m+）
+    // 首个定位缓冲：攒 3 个高精度 fix（≤ GOOD_ACC_M）或 10 秒超时取中位数定 Home。
+    // 只数任意 3 个 fix 会把网络粗定位点（GCJ-02/acc 大）定成 Home，后续 GPS 点与 Home 偏离数百米（定位不准根因之二）
     private val pendingFixes = mutableListOf<Fix>()
     private var pendingStartAt = 0L
 
@@ -292,10 +294,13 @@ object RecorderHub {
         _gpsAcc.value = f.acc
         val r = recorder
         if (r == null && _waiting.value) {
-            // 攒 3 个 fix（或 3 秒）→ 中位数定 Home；单个 fix 噪声太大
+            // 攒 3 个高精度 fix（或 10 秒超时）→ 中位数定 Home；
+            // 优先等 GPS 精点，避免网络粗定位点（坐标系/精度都不可靠）定成 Home
             pendingFixes.add(f)
             val t = nowMs()
-            if (pendingFixes.size >= 3 || t - pendingStartAt >= 3000) {
+            val goodCount = pendingFixes.count { it.acc <= Constants.GOOD_ACC_M }
+            val ready = goodCount >= 3 || (pendingFixes.isNotEmpty() && t - pendingStartAt >= 10_000)
+            if (ready) {
                 val fresh = RecorderState.fresh(_bizDate.value)
                 try {
                     fresh.start(pendingFixes.toList(), t, f)

@@ -124,6 +124,7 @@
   /* ---------- 图层：普通地图（高德→OSM 兜底）+ 卫星（高德） ---------- */
   var street = null, sat = null, curLayer = 'street';
   var streetSrc = 0, streetErr = 0, satErr = 0;
+  var streetOk = 0; // 街道层成功瓦片计数（看门狗专用，不受卫星层干扰）
 
   /* ---------- 诊断徽标（真机可见，定位"地图不显示"根因，无需 logcat） ---------- */
   var dbg = { ok: 0, fail: 0, src: '高德', layer: 'street', t0: Date.now() };
@@ -165,6 +166,7 @@
     // P4：成功/失败都打日志；成功即重置错误计数并隐藏兜底浮层（P6）
     layer.on('tileload', function () {
       streetErr = 0;
+      streetOk++;
       dbg.ok++; updateDebug();
       // 街道层（高德或 OSM）瓦片成功即表示底图可用，隐藏兜底浮层——
       // 不能只看 streetSrc===1，否则"卫星失败→切回高德街道成功"后浮层会永远不消失
@@ -238,6 +240,22 @@
   makeStreet();
   makeSat();
   syncButtons();
+
+  /* ---------- 看门狗：页面加载 10s 内街道层 0 张成功 → 立即回退 OSM ----------
+   * 原回退要攒够 6 次 tileerror；拦截层阻塞/弱网下 error 事件来得极慢，地图长时间空白。
+   * 只看 streetOk（不含卫星层），避免误判。 */
+  setTimeout(function () {
+    if (streetSrc === 0 && streetOk === 0) {
+      console.warn('[BaibaiMap] 10 秒内街道瓦片零成功，提前回退 OSM');
+      streetSrc = 1;
+      streetErr = 0;
+      dbg.src = 'OSM'; updateDebug('回退OSM');
+      useGcj = false;
+      if (street) map.removeLayer(street);
+      makeStreet();
+      redrawAll();
+    }
+  }, 10000);
 
   /* ---------- 轨迹（分段：走过=淡红，当前段=实红粗线，像导航一样实时增长） ---------- */
   var rawTrack = [];      // WGS-84 [[lat,lng],...]

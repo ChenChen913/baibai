@@ -103,6 +103,9 @@ private val GlassCardBorder = Color(0x66FFFFFF) // 白 40%
 /** 瓦片/地图链路统一日志 tag（P4）：logcat 过滤 BaibaiMap 即可看全链路 */
 private const val MAP_LOG = "BaibaiMap"
 
+/** 实时瓦片限时等待（ms）：超时放行 WebView 自取，弱网下不阻塞渲染线程 */
+private const val LIVE_TILE_WAIT_MS = 1200L
+
 /** 记录页（原始需求 §7.1）：
  * 品牌栏 → 状态大卡 → 实时地图卡（可折叠，展开约屏高 30~35%）→ 主按钮区 → 工具条。
  * 上部滚动、底部主按钮区+工具条固定于拇指热区；安全区由 BaibaiPage 统一处理。 */
@@ -651,12 +654,10 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 )
                             }
 
-                            // 瓦片统一走 TileCache.download（缓存优先→网络下载）并通过 WebResourceResponse
-                            // 注入字节给 <img>。这是最可靠路径：字节在网络层注入，绕过 file:// origin 对
-                            // 跨域 https 子资源的任何限制（部分国产 ROM 的 WebView 从 file:// 自取 https 瓦片不稳，
-                            // 故不采用“返回 null 让 WebView 自取”的方案）。
-                            // P1 已拆锁：单 key 锁 + 预载走独立线程池，此处同步下载不会饿死其他瓦片请求。
-                            // P2：MIME 按 URL 判定（style=6 卫星实为 JPEG）。
+                            // 瓦片统一走 TileCache.downloadFast（缓存命中秒回；未命中限时 1.2s，超时放行 WebView 自取，
+                            // 后台继续回填）并通过 WebResourceResponse 注入字节给 <img>。
+                            // 不再同步阻塞最长 9s：弱网下 WebView 网络线程池被占满会导致地图长时间空白（地图无法显示的根因修复）。
+                            // P1 已拆锁：单 key 锁 + 预载走独立线程池；P2：MIME 按 URL 判定（style=6 卫星实为 JPEG）。
                             override fun shouldInterceptRequest(
                                 view: WebView?,
                                 request: WebResourceRequest?,
@@ -665,7 +666,8 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 val isTile = u.contains("is.autonavi.com/appmaptile") ||
                                     u.contains("tile.openstreetmap.org")
                                 if (!isTile) return null
-                                val bytes = tileCache.download(u) ?: return null // 下载失败→放行 WebView 自取兜底
+                                val bytes = tileCache.downloadFast(u, LIVE_TILE_WAIT_MS)
+                                    ?: return null // 限时未拿到→放行 WebView 自取兜底（后台仍在回填缓存）
                                 val mime = if (u.contains("style=6")) "image/jpeg" else "image/png"
                                 return WebResourceResponse(
                                     mime,
