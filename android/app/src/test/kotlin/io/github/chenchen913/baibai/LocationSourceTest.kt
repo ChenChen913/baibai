@@ -66,8 +66,9 @@ class LocationSourceTest {
         l.longitude = lng
         l.accuracy = acc
         l.time = nowMs
+        // 直接调监听器回调（不依赖 Robolectric 版本的 ShadowLocationManager 派发 API）
         val listener = gpsListener() ?: error("未注册定位监听")
-        shadowOf(lm).notifyLocationChanged(listener, l)
+        listener.onLocationChanged(l)
     }
 
     @Test
