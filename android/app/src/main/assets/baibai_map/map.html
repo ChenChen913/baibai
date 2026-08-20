@@ -14,6 +14,29 @@
   .home-pin { width:30px; height:30px; background:linear-gradient(135deg,#E8A23D,#D49130); font-size:14px; }
   .node-pin { width:26px; height:26px; background:linear-gradient(135deg,#C8402F,#A62D22); font-size:12px; }
   .baibai-node-icon, .baibai-home-icon { background:transparent; border:none; }
+  /* v1.0.10 朝向「探照灯」：当前位置点容器（divIcon 透明外壳） */
+  .baibai-me-wrap { background:transparent; border:none; }
+  /* 高德式蓝色光锥：60° 扇形（conic-gradient）+ 边缘径向淡出（mask），
+     0°=正北；未收到朝向前 opacity:0 静默隐藏（无传感器设备不显示、不报错），
+     transition 配合 Kotlin 侧 15Hz 节流 + JS 低通滤波，旋转平滑不跳变 */
+  .me-cone {
+    position:absolute; left:50%; top:50%;
+    width:80px; height:80px; margin:-40px 0 0 -40px;
+    background:conic-gradient(from -30deg, rgba(64,140,255,.42) 0deg 60deg, transparent 60deg);
+    -webkit-mask-image:radial-gradient(circle, #000 0%, #000 55%, transparent 98%);
+    mask-image:radial-gradient(circle, #000 0%, #000 55%, transparent 98%);
+    border-radius:50%;
+    transform:rotate(0deg);
+    transition:transform .15s linear;
+    opacity:0;
+  }
+  /* 位置点：沿用原 circleMarker 的视觉（红底白描边） */
+  .me-dot {
+    position:absolute; left:50%; top:50%;
+    width:18px; height:18px; margin:-9px 0 0 -9px;
+    background:#C8402F; border:2.5px solid #fff; border-radius:50%;
+    box-shadow:0 2px 6px rgba(90,58,42,.4);
+  }
   .attribution {
     position:absolute; right:0; bottom:0; z-index:1000; font-size:10px;
     color:rgba(90,58,42,.5); background:rgba(255,255,255,.6);
@@ -382,12 +405,22 @@
   /* ---------- 当前位置点 + 精度圈 ---------- */
   var me = null, accCircle = null;
   var rawMe = null; // 原始 WGS-84 坐标（重绘时重新按当前图层坐标系转换，避免二次转换漂移）
+  var headingSmooth = null; // v1.0.10：平滑后的朝向角（null=尚未收到朝向，光锥隐藏）
   function drawMe(lat, lng, acc) {
     rawMe = [lat, lng];
     var c = cvt([lat, lng]);
     if (!me) {
-      me = L.circleMarker(c, {
-        radius: 9, color: '#ffffff', weight: 2.5, fillColor: '#C8402F', fillOpacity: 1,
+      // v1.0.10：circleMarker 升级为 divIcon——光锥层（me-cone）随 setHeading 只改 transform，
+      // 不重建 DOM/不重绘地图，性能无损；位置点视觉不变（me-dot 复刻原红底白描边圆点）
+      me = L.marker(c, {
+        icon: L.divIcon({
+          className: 'baibai-me-wrap',
+          html: '<div class="me-cone" id="me-cone"></div><div class="me-dot"></div>',
+          iconSize: [80, 80],
+          iconAnchor: [40, 40],
+        }),
+        zIndexOffset: 500,
+        interactive: false,
       }).addTo(map);
     } else {
       me.setLatLng(c);
@@ -509,6 +542,23 @@
     showDebug: function (on) {
       var el = document.getElementById('map-debug');
       if (el) el.style.display = on ? 'block' : 'none';
+    },
+
+    // v1.0.10 朝向「探照灯」：真北方位角（度，0~360 顺时针）→ 旋转光锥。
+    // 低通滤波（α=0.35）消磁力计抖动 + 最短弧插值（359°→1° 顺转 2°，不逆转 358°）；
+    // 只改光锥 transform，不触地图重绘。首次调用时光锥淡入显示。
+    setHeading: function (deg) {
+      if (!isFinite(deg)) return;
+      var cone = document.getElementById('me-cone');
+      if (!cone) return;
+      if (headingSmooth === null) {
+        headingSmooth = deg;
+      } else {
+        var d = ((deg - headingSmooth + 540) % 360) - 180; // 折到 [-180,180]：最短弧
+        headingSmooth = (headingSmooth + d * 0.35 + 360) % 360;
+      }
+      cone.style.opacity = '1';
+      cone.style.transform = 'rotate(' + headingSmooth.toFixed(1) + 'deg)';
     },
   };
 })();

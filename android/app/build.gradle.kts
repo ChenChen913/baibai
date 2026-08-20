@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.chenchen913.baibai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.0.9"
+        versionCode = 7
+        versionName = "1.0.10"
     }
 
     buildFeatures {

@@ -60,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -489,6 +490,22 @@ private fun MapLayer(ctl: MapController, pxHeight: Int) {
                 }
             }
         }
+    }
+
+    // v1.0.10 朝向「探照灯」：ROTATION_VECTOR 传感器 → 真北方位角 → BaibaiMap.setHeading 旋转光锥。
+    // 进记录页注册、离开注销（省电）；无传感器设备（老机型/模拟器）hasSensor=false 静默不注册，
+    // 光锥保持隐藏（map.html 里 opacity:0 初始态），不报错不打扰。
+    // onSensorChanged 在主线程回调（HeadingSource 内部传了主线程 Handler），可直接 evaluateJavascript。
+    DisposableEffect(Unit) {
+        val heading = HeadingSource(appContext) { RecorderHub.source?.lastFix?.pos }
+        heading.onHeading = { deg ->
+            val w = webView.value
+            if (pageReady && w != null) {
+                w.evaluateJavascript("BaibaiMap.setHeading(" + deg + ")", null)
+            }
+        }
+        heading.start()
+        onDispose { heading.stop() }
     }
 
     AndroidView(
