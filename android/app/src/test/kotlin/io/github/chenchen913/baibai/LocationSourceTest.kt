@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.chenchen913.baibai.core.errors.GpsErrorKind
 import io.github.chenchen913.baibai.core.model.Fix
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
