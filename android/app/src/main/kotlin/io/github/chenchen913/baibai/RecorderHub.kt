@@ -87,9 +87,8 @@ object RecorderHub {
     // 只复用 GPS 点（src=="net" 的 GCJ-02 网络点坐标系不可靠，R6 教训）
     private var lastFixArrivedAt = 0L
 
-    companion object {
-        private const val FIX_REUSE_MS = 10 * 60 * 1000L
-    }
+    // R9：定位缓存时效 10 分钟（object 内直接放常量——Kotlin 不允许独立 object 内嵌 companion）
+    private const val FIX_REUSE_MS = 10 * 60 * 1000L
 
     fun init(app: Application) {
         if (this::store.isInitialized) return
