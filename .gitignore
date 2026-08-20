@@ -10,6 +10,9 @@ organicmaps-master/
 baibai2/
 baibai3/
 
+# 外部对话记录（个人排查笔记，不入库）
+聊天记录.txt
+
 # Android（Gradle）
 android/.gradle/
 android/**/build/
