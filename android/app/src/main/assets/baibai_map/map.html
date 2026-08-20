@@ -62,7 +62,7 @@
 <div id="map-error" class="map-error-overlay">
   <div class="map-error-card">
     ⚠️ <b>地图暂不可用</b><br/>
-    请检查网络，或点上方「预载」提前缓存周边<br/>
+    请检查网络连接（高德与备用瓦片源均失败）<br/>
     <span class="hint">轨迹与拜访记录不受影响，仍会正常保存</span>
   </div>
 </div>
@@ -138,19 +138,53 @@
     catch (e) { return false; }
   }
 
-  /* ---------- 诊断徽标（真机可见，定位"地图不显示"根因，无需 logcat） ---------- */
+  /* ---------- 诊断徽标 → 渲染探针（真机可见，无需 logcat） ----------
+   * 真机证据「OK>0 失败 0 但白屏」：瓦片下载成功却不渲染，问题在渲染层。
+   * 探针把容器尺寸 / 瓦片像素与 opacity / pane 可见性全部打在徽标上，
+   * 下一版真机一眼定位卡点（容器 0 尺寸？瓦片 opacity:0？pane 被隐藏？）。 */
   var dbg = { ok: 0, fail: 0, src: '高德', layer: 'street', t0: Date.now() };
   var dbgEl = document.getElementById('map-debug');
+  var lastTile = null; // 最近一片「真实成功」的瓦片 img，供探针检查渲染状态
   function dbgDot(color) { return '<span class="dot" style="background:' + color + '"></span>'; }
+  function tileInfo(t) {
+    if (!t) return '无';
+    var cs;
+    try { cs = window.getComputedStyle(t); } catch (e) { cs = null; }
+    return t.naturalWidth + 'x' + t.naturalHeight + 'px' +
+      ' 完整:' + t.complete +
+      ' op:' + (cs ? cs.opacity : t.style.opacity) +
+      ' vis:' + (cs ? cs.visibility : t.style.visibility) +
+      ' disp:' + (cs ? cs.display : t.style.display) +
+      ' DOM:' + (t.parentNode ? '有' : '无');
+  }
+  function renderInfo() {
+    var c = map.getContainer();
+    var sz = map.getSize();
+    var pane = document.querySelector('.leaflet-tile-pane');
+    var cs;
+    try { cs = pane ? window.getComputedStyle(pane) : null; } catch (e) { cs = null; }
+    return '容器:' + c.clientWidth + 'x' + c.clientHeight +
+      ' Leaflet:' + sz.x + 'x' + sz.y +
+      ' z:' + map.getZoom() +
+      ' 中心:' + map.getCenter().lat.toFixed(3) + ',' + map.getCenter().lng.toFixed(3) +
+      ' | 瓦片:' + tileInfo(lastTile) +
+      ' | Pane:' + (pane ? '有' : '无') +
+      ' op:' + (cs ? cs.opacity : '?') +
+      ' vis:' + (cs ? cs.visibility : '?');
+  }
   function updateDebug(status) {
     if (!dbgEl) return;
     var color = dbg.fail > 0 && dbg.ok === 0 ? '#C8402F' : (dbg.ok > 0 ? '#3DA35D' : '#E8A23D');
     var src = dbg.layer === 'sat' ? '卫星' : dbg.src;
-    var line = dbgDot(color) + src + ' ' + (status || (dbg.ok > 0 ? '加载中' : '等待')) +
+    var line1 = dbgDot(color) + src + ' ' + (status || (dbg.ok > 0 ? '加载中' : '等待')) +
       ' | OK ' + dbg.ok + ' 失败 ' + dbg.fail;
-    dbgEl.innerHTML = line;
+    dbgEl.innerHTML = line1 + '<br/>' + renderInfo();
+  }
+  function logProbe(tag) {
+    console.warn('[BaibaiMap][探针' + tag + '] ' + renderInfo());
   }
   updateDebug('页面已加载·等待瓦片');
+  logProbe('初始');
 
   /* ---------- P6：地图失败可见兜底（高德+OSM 均失败时显示，替代"无声空白"） ---------- */
   var mapErrorEl = document.getElementById('map-error');
@@ -198,6 +232,7 @@
       }
       streetErr = 0;
       streetOk++;
+      lastTile = e.tile;
       dbg.ok++; updateDebug();
       // 街道层（高德或 OSM）瓦片成功即表示底图可用，隐藏兜底浮层——
       // 不能只看 streetSrc===1，否则“卫星失败→切回高德街道成功”后浮层会永远不消失
@@ -243,6 +278,7 @@
         return;
       }
       satErr = 0;
+      lastTile = e.tile;
       dbg.ok++; updateDebug();
       if (curLayer === 'sat') hideMapError();
     });
@@ -293,6 +329,15 @@
       fallbackStreet();
     }
   }, 10000);
+
+  /* ---------- 渲染探针定时采样：白屏时每隔 3s 打一条探针日志（前 30s），真机 logcat 可见 ---------- */
+  var probeN = 0;
+  var probeTimer = setInterval(function () {
+    probeN++;
+    logProbe('#' + probeN);
+    updateDebug();
+    if (probeN >= 10) clearInterval(probeTimer);
+  }, 3000);
 
   /* ---------- 轨迹（分段：走过=淡红，当前段=实红粗线，像导航一样实时增长） ---------- */
   var rawTrack = [];      // WGS-84 [[lat,lng],...]

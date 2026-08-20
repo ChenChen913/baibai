@@ -6,10 +6,8 @@ import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import java.io.ByteArrayInputStream
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,7 +56,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,7 +77,6 @@ import io.github.chenchen913.baibai.core.model.SessionState
 import io.github.chenchen913.baibai.core.model.TrackPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -452,10 +448,10 @@ private fun TimeColumn(digitSp: Float, modifier: Modifier) {
 
 /* ---------- 3. 实时地图卡（真实地图：WebView + Leaflet + 高德/OSM/Esri，免 Key 免费） ----------
  * 折叠 = 40dp 标题条，展开 = 屏高 30%~35%。
- * 瓦片：shouldInterceptRequest 只读本地缓存（命中秒回；未命中放行 WebView 自取 + 异步回填），
- * 绝不用 Kotlin 侧下载代替 WebView 请求——高德风控会给非浏览器指纹请求返回 1×1 占位图，
- * 导致「假成功」满屏米色空白（真机实测根因）；预载走 TileCache 独立线程池（审核报告 P1/P3）；
- * 失败自动换源（高德街道→OSM、高德卫星→Esri），全部失败时 map.html 显示可见兜底浮层（P6）。 */
+ * 【诊断版架构（2026-08-20 采纳外部分析）】真机 OK>0 但白屏证明网络层已通、问题在渲染层：
+ * 彻底移除 shouldInterceptRequest / TileCache 注入 / 预载——瓦片完全由 WebView 自取（与手机浏览器
+ * 同一条链路，网页版已验证可用），把变量降到最少；map.html 诊断徽标升级为渲染探针。
+ * 离线缓存/预载待渲染问题确认修复后再逐层加回。 */
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -467,25 +463,11 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
     val session = RecorderHub.session.collectAsState().value
     val syncKey = (session?.state ?: SessionState.IDLE) to (session?.nodes?.size ?: 0)
 
-    // P0 离线瓦片缓存：Home 确定后自动预载周边；手动按钮随时可再预载
     val appContext = LocalContext.current.applicationContext
-    val tileCache = remember { TileCache(appContext) }
-    val scope = rememberCoroutineScope()
-    var preloading by remember { mutableStateOf(false) }
-    var preloadedFor by remember { mutableStateOf<String?>(null) }
-
-    fun startPreload(homeLat: Double, homeLng: Double) {
-        if (preloading) return
-        preloading = true
-        val urls = TileMath.preloadList(homeLat, homeLng)
-        RecorderHub.toast("正在预载周边地图（" + urls.size + " 张，约几 MB）…")
-        scope.launch {
-            val ok = withContext(Dispatchers.IO) { tileCache.preload(urls) }
-            preloading = false
-            RecorderHub.toast(
-                if (ok > 0) "已预载 " + ok + " 张瓦片，断网也能看地图"
-                else "预载失败：请检查网络后重试",
-            )
+    // 清理旧版遗留的瓦片缓存目录（旧版曾被高德风控占位图毒化；本版不再用缓存，直接清掉释放空间）
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            runCatching { java.io.File(appContext.cacheDir, "tiles").deleteRecursively() }
         }
     }
 
@@ -503,15 +485,6 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                 "BaibaiMap.setNodes(" + latLngJson(snap.home) + ", " + nodesJson(snap.nodes) + ")",
                 null,
             )
-            // P0：Home 确定后自动预载周边瓦片（每个 Home 只预载一次）
-            val homeValid = snap.home.lat != 0.0 || snap.home.lng != 0.0
-            if (homeValid) {
-                val key = "%.5f,%.5f".format(snap.home.lat, snap.home.lng)
-                if (preloadedFor != key) {
-                    preloadedFor = key
-                    startPreload(snap.home.lat, snap.home.lng)
-                }
-            }
         } else {
             // P7：IDLE 态把地图中心移到用户上次的位置（当前定位源 / 系统最后已知位置 / 最近一次记录的家），
             // 而不是固定潍坊——避免用户误以为"地图加载错了"
@@ -576,24 +549,6 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
             ) {
                 Text("实时轨迹", fontSize = 14.sp, fontWeight = FontWeight.Black, color = BaibaiInk)
                 Spacer(Modifier.weight(1f))
-                // P0：预载周边地图（Home 或最近一次记录的 Home）
-                Text(
-                    if (preloading) "预载中…" else "预载",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (preloading) BaibaiInk.copy(alpha = 0.4f) else BaibaiAccent,
-                    modifier = Modifier
-                        .clickable(enabled = !preloading) {
-                            val home = RecorderHub.recorder?.snapshot()?.home
-                                ?: RecorderHub.store.listSessions().maxByOrNull { it.createdAt }?.home
-                            if (home == null || (home.lat == 0.0 && home.lng == 0.0)) {
-                                RecorderHub.toast("还没有定位或历史记录：先开始拜年，再点这里预载")
-                            } else {
-                                startPreload(home.lat, home.lng)
-                            }
-                        }
-                        .padding(horizontal = 10.dp, vertical = 12.dp),
-                )
                 // 线性折叠图标（无圆形白底），热区 ≥48dp
                 IconButton(onClick = { pageReady = false; mapOpen = false }) {
                     Icon(
@@ -614,12 +569,11 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                         settings.builtInZoomControls = false
                         settings.setSupportZoom(false)
                         settings.displayZoomControls = false
-                        // 瓦片字节由 shouldInterceptRequest 在网络层注入，file:// 页面不自行跨域取资源，
+                        // 瓦片由 WebView 像浏览器一样直接跨域取（https 瓦片源不受 file:// 同源限制），
                         // 因此无需 allowUniversalAccessFromFileURLs / mixedContentMode 等安全放宽项
                         settings.allowFileAccess = true
                         settings.allowContentAccess = true
-                        // P5：与 TileCache 完全一致的浏览器默认 UA（不加自定义后缀，避免触发高德风控）
-                        settings.userAgentString = tileCache.userAgent
+                        // 诊断版：UA 用 WebView 默认（即真实浏览器 UA），不叠加任何自定义标识
                         // P4：把 map.html 的 console.warn/error 接到 logcat（tag=BaibaiMap），真机可定位
                         webChromeClient = object : WebChromeClient() {
                             override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
@@ -652,35 +606,10 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 )
                             }
 
-                            // 瓦片缓存只读注入：命中秒回；未命中放行 WebView 自取（与手机浏览器行为一致，
-                            // 网页版已验证可用）+ 后台异步回填缓存。绝不用 Kotlin 侧下载代替 WebView 请求：
-                            // 高德风控会给 Kotlin HttpURLConnection 返回 HTTP 200 的 1×1 占位图，
-                            // 「假成功」会毒化缓存、骗过 tileload 计数、让回退看门狗永不触发（真机实测根因）。
-                            // P2：MIME 按 URL 判定（style=6 卫星与 Esri 实为 JPEG）。
-                            override fun shouldInterceptRequest(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                            ): WebResourceResponse? {
-                                val u = request?.url?.toString() ?: return null
-                                val isTile = u.contains("is.autonavi.com/appmaptile") ||
-                                    u.contains("tile.openstreetmap.org") ||
-                                    u.contains("server.arcgisonline.com")
-                                if (!isTile) return null
-                                val bytes = tileCache.get(u)
-                                if (bytes == null) {
-                                    tileCache.backfillAsync(u) // 不阻塞：WebView 自取的同时后台尝试回填
-                                    return null
-                                }
-                                val mime = if (u.contains("style=6") || u.contains("arcgisonline")) "image/jpeg" else "image/png"
-                                return WebResourceResponse(
-                                    mime,
-                                    null,
-                                    200,
-                                    "OK",
-                                    mapOf("Cache-Control" to "max-age=31536000, immutable"),
-                                    ByteArrayInputStream(bytes),
-                                )
-                            }
+                            // 【诊断版】不再拦截任何瓦片请求：shouldInterceptRequest 整个移除，
+                            // WebView 像普通浏览器一样直接取瓦片（网页版已验证可用）。
+                            // 若本版真机仍白屏，则可排除拦截/缓存层，问题锁定在 WebView 渲染层，
+                            // 由 map.html 渲染探针（容器尺寸/瓦片像素/opacity）继续定位。
                         }
                         loadUrl("file:///android_asset/baibai_map/map.html")
                     }
