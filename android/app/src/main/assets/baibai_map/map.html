@@ -49,6 +49,9 @@
     box-shadow:0 1px 4px rgba(90,58,42,.12);
   }
   .map-debug .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  /* M2 新版首页：图层切换由 Compose 右侧工具栏接管（BaibaiMap.switchLayer，隐藏按钮仍可被程序点击），
+     诊断徽标默认隐藏（BaibaiMap.showDebug(true) 可唤出，App 内长按「图层」按钮触发） */
+  .layer-switch, .map-debug { display: none; }
 </style>
 </head>
 <body>
@@ -492,6 +495,20 @@
       rawHome = home || null;
       rawNodes = nodes || [];
       drawNodes();
+    },
+
+    // M2：Compose 右侧工具栏的图层切换入口——复用 HTML 按钮的点击逻辑
+    //（隐藏的按钮仍可被程序 click()：换底图 + 按新坐标系重绘全部覆盖物）
+    switchLayer: function (layer) {
+      var btn = document.getElementById(layer === 'sat' ? 'btn-sat' : 'btn-street');
+      if (btn) btn.click();
+      return curLayer;
+    },
+
+    // M2：诊断徽标开关（默认隐藏；排查真机瓦片问题时由 App 唤出）
+    showDebug: function (on) {
+      var el = document.getElementById('map-debug');
+      if (el) el.style.display = on ? 'block' : 'none';
     },
   };
 })();
