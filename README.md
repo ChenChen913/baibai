@@ -75,6 +75,7 @@ npm test         # vitest 单元测试（111 项）
 
 | 日期 | 事项 | 内容 |
 |---|---|---|
+| 08-20 | **真机实测锁定终极根因：高德风控占位图** | v1.0.0 真机仍空白：高德给 Kotlin 代下请求返回 HTTP 200 的 1×1 米色占位图（假成功毒化缓存、骗过回退看门狗）。四层修复：拦截层改缓存只读+WebView 自取为主（与浏览器行为一致）、占位图检测拒入缓存+历史中毒自清理、JS 侧按像素尺寸识破假成功（街道→OSM、卫星→新增 Esri 兜底）、UA 去自定义后缀；新增 TileCacheTest 5 项回归 |
 | 08-20 | **首个发行版 v1.0.0-android** | [GitHub Releases](https://github.com/ChenChen913/baibai/releases/tag/v1.0.0-android) 发布首个可安装 APK（含定位/地图两大修复，CI 全绿产物）；本地副本 `android/dist/app-debug.apk` 同步更新，后续每次发版同步 |
 | 08-20 | **定位不准根因修复** | 双源坐标系网关：国产 ROM 网络定位返回 GCJ-02 与 GPS 的 WGS-84 混用导致 Home 定错坐标系、轨迹跳飞 300~600m——GPS 点到达后 8s 内丢弃网络点、基站粗定位（acc>300m）直接丢弃；首定 Home 改攒 3 个高精度 fix（窗 3s→10s，不再拿网络粗点凑数）；新增 LocationSourceTest 5 项网关回归 |
 | 08-20 | **地图不显示根因修复** | 拦截层同步下载（最长 9s/张）改限时 1.2s 回填（`downloadFast`，超时放行 WebView 自取、后台继续入缓存，实时回填专用线程池与预载隔离）；map.html 加看门狗：10s 内街道瓦片零成功立即回退 OSM（不再干等 6 次 tileerror） |

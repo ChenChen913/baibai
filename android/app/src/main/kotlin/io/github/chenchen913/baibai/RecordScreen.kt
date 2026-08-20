@@ -103,9 +103,6 @@ private val GlassCardBorder = Color(0x66FFFFFF) // 白 40%
 /** 瓦片/地图链路统一日志 tag（P4）：logcat 过滤 BaibaiMap 即可看全链路 */
 private const val MAP_LOG = "BaibaiMap"
 
-/** 实时瓦片限时等待（ms）：超时放行 WebView 自取，弱网下不阻塞渲染线程 */
-private const val LIVE_TILE_WAIT_MS = 1200L
-
 /** 记录页（原始需求 §7.1）：
  * 品牌栏 → 状态大卡 → 实时地图卡（可折叠，展开约屏高 30~35%）→ 主按钮区 → 工具条。
  * 上部滚动、底部主按钮区+工具条固定于拇指热区；安全区由 BaibaiPage 统一处理。 */
@@ -453,11 +450,12 @@ private fun TimeColumn(digitSp: Float, modifier: Modifier) {
     }
 }
 
-/* ---------- 3. 实时地图卡（真实地图：WebView + Leaflet + 高德/OSM，免 Key 免费） ----------
+/* ---------- 3. 实时地图卡（真实地图：WebView + Leaflet + 高德/OSM/Esri，免 Key 免费） ----------
  * 折叠 = 40dp 标题条，展开 = 屏高 30%~35%。
- * 瓦片：shouldInterceptRequest 只查本地缓存（命中即返回；未命中异步回填并放行 WebView 自取），
- * 预载走 TileCache 独立线程池，两者互不阻塞（审核报告 P1/P3）；
- * 失败自动换源（高德→OSM），全部失败时 map.html 显示可见兜底浮层（P6），轨迹/标记照常绘制。 */
+ * 瓦片：shouldInterceptRequest 只读本地缓存（命中秒回；未命中放行 WebView 自取 + 异步回填），
+ * 绝不用 Kotlin 侧下载代替 WebView 请求——高德风控会给非浏览器指纹请求返回 1×1 占位图，
+ * 导致「假成功」满屏米色空白（真机实测根因）；预载走 TileCache 独立线程池（审核报告 P1/P3）；
+ * 失败自动换源（高德街道→OSM、高德卫星→Esri），全部失败时 map.html 显示可见兜底浮层（P6）。 */
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -620,7 +618,7 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                         // 因此无需 allowUniversalAccessFromFileURLs / mixedContentMode 等安全放宽项
                         settings.allowFileAccess = true
                         settings.allowContentAccess = true
-                        // P5：与 TileCache 完全一致的 UA（浏览器默认 UA + baibai 标识），命中/未命中行为不再分裂
+                        // P5：与 TileCache 完全一致的浏览器默认 UA（不加自定义后缀，避免触发高德风控）
                         settings.userAgentString = tileCache.userAgent
                         // P4：把 map.html 的 console.warn/error 接到 logcat（tag=BaibaiMap），真机可定位
                         webChromeClient = object : WebChromeClient() {
@@ -654,21 +652,26 @@ private fun MapCard(mapOpenHeight: androidx.compose.ui.unit.Dp) {
                                 )
                             }
 
-                            // 瓦片统一走 TileCache.downloadFast（缓存命中秒回；未命中限时 1.2s，超时放行 WebView 自取，
-                            // 后台继续回填）并通过 WebResourceResponse 注入字节给 <img>。
-                            // 不再同步阻塞最长 9s：弱网下 WebView 网络线程池被占满会导致地图长时间空白（地图无法显示的根因修复）。
-                            // P1 已拆锁：单 key 锁 + 预载走独立线程池；P2：MIME 按 URL 判定（style=6 卫星实为 JPEG）。
+                            // 瓦片缓存只读注入：命中秒回；未命中放行 WebView 自取（与手机浏览器行为一致，
+                            // 网页版已验证可用）+ 后台异步回填缓存。绝不用 Kotlin 侧下载代替 WebView 请求：
+                            // 高德风控会给 Kotlin HttpURLConnection 返回 HTTP 200 的 1×1 占位图，
+                            // 「假成功」会毒化缓存、骗过 tileload 计数、让回退看门狗永不触发（真机实测根因）。
+                            // P2：MIME 按 URL 判定（style=6 卫星与 Esri 实为 JPEG）。
                             override fun shouldInterceptRequest(
                                 view: WebView?,
                                 request: WebResourceRequest?,
                             ): WebResourceResponse? {
                                 val u = request?.url?.toString() ?: return null
                                 val isTile = u.contains("is.autonavi.com/appmaptile") ||
-                                    u.contains("tile.openstreetmap.org")
+                                    u.contains("tile.openstreetmap.org") ||
+                                    u.contains("server.arcgisonline.com")
                                 if (!isTile) return null
-                                val bytes = tileCache.downloadFast(u, LIVE_TILE_WAIT_MS)
-                                    ?: return null // 限时未拿到→放行 WebView 自取兜底（后台仍在回填缓存）
-                                val mime = if (u.contains("style=6")) "image/jpeg" else "image/png"
+                                val bytes = tileCache.get(u)
+                                if (bytes == null) {
+                                    tileCache.backfillAsync(u) // 不阻塞：WebView 自取的同时后台尝试回填
+                                    return null
+                                }
+                                val mime = if (u.contains("style=6") || u.contains("arcgisonline")) "image/jpeg" else "image/png"
                                 return WebResourceResponse(
                                     mime,
                                     null,

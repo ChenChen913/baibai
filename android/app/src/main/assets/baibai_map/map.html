@@ -58,7 +58,7 @@
   <button id="btn-street" class="on">地图</button>
   <button id="btn-sat">卫星</button>
 </div>
-<div class="attribution">© 高德地图 / OpenStreetMap</div>
+<div class="attribution">© 高德地图 / OpenStreetMap / Esri Maxar</div>
 <div id="map-error" class="map-error-overlay">
   <div class="map-error-card">
     ⚠️ <b>地图暂不可用</b><br/>
@@ -115,16 +115,28 @@
     dLng = (dLng * 180.0) / (A / sqrtMagic * Math.cos(radLat) * PI);
     return [lat + dLat, lng + dLng];
   }
-  var useGcj = true; // 高德瓦片=GCJ；回退 OSM 时切回 WGS
+  /* 坐标系按当前图层动态判定（见 gcjActive）：卫星与街道可各自独立回退，不再用全局开关 */
+  function gcjActive() {
+    // 高德瓦片=GCJ-02；OSM/Esri=WGS-84。按当前显示的图层判定（卫星可能与街道处于不同回退阶段）
+    return curLayer === 'sat' ? satSrc === 0 : streetSrc === 0;
+  }
   function cvt(p) {
-    if (!useGcj) return [p[0], p[1]];
+    if (!gcjActive()) return [p[0], p[1]];
     return wgs2gcj(p[0], p[1]);
   }
 
-  /* ---------- 图层：普通地图（高德→OSM 兜底）+ 卫星（高德） ---------- */
+  /* ---------- 图层：普通地图（高德→OSM 兜底）+ 卫星（高德→Esri 兜底） ---------- */
   var street = null, sat = null, curLayer = 'street';
-  var streetSrc = 0, streetErr = 0, satErr = 0;
+  var streetSrc = 0, satSrc = 0, streetErr = 0, satErr = 0;
   var streetOk = 0; // 街道层成功瓦片计数（看门狗专用，不受卫星层干扰）
+
+  /* 风控占位图识别（真机实测根因）：高德对可疑请求返回 HTTP 200 的 1×1 米色图，
+   * 浏览器仍会触发 tileload（「假成功」）——必须按真实像素尺寸识破并计为失败，
+   * 否则回退看门狗永不触发、地图永远米色空白 */
+  function isPlaceholder(img) {
+    try { return !!(img && img.complete && img.naturalWidth <= 2 && img.naturalHeight <= 2); }
+    catch (e) { return false; }
+  }
 
   /* ---------- 诊断徽标（真机可见，定位"地图不显示"根因，无需 logcat） ---------- */
   var dbg = { ok: 0, fail: 0, src: '高德', layer: 'street', t0: Date.now() };
@@ -155,6 +167,17 @@
     mapErrorEl.style.display = 'none';
   }
 
+  function fallbackStreet() {
+    if (streetSrc === 1) { if (streetErr > 6) showMapError(); return; }
+    console.warn('[BaibaiMap] 高德街道瓦片不可用（失败或风控占位图），回退 OSM');
+    streetSrc = 1;
+    streetErr = 0;
+    dbg.src = 'OSM'; updateDebug('回退OSM');
+    if (street) map.removeLayer(street);
+    makeStreet();
+    redrawAll();
+  }
+  
   function makeStreet() {
     var isGaode = streetSrc === 0;
     var url = isGaode
@@ -164,12 +187,20 @@
     if (isGaode) opts.subdomains = '1234';
     var layer = L.tileLayer(url, opts);
     // P4：成功/失败都打日志；成功即重置错误计数并隐藏兜底浮层（P6）
-    layer.on('tileload', function () {
+    layer.on('tileload', function (e) {
+      if (isPlaceholder(e.tile)) {
+        // 「假成功」计为失败：占位图骗得过 tileload，骗不过像素尺寸
+        streetErr += 1;
+        dbg.fail++; updateDebug('风控占位');
+        console.warn('[BaibaiMap] 街道瓦片为风控占位图 #' + streetErr);
+        if (streetErr > 4) fallbackStreet();
+        return;
+      }
       streetErr = 0;
       streetOk++;
       dbg.ok++; updateDebug();
       // 街道层（高德或 OSM）瓦片成功即表示底图可用，隐藏兜底浮层——
-      // 不能只看 streetSrc===1，否则"卫星失败→切回高德街道成功"后浮层会永远不消失
+      // 不能只看 streetSrc===1，否则“卫星失败→切回高德街道成功”后浮层会永远不消失
       if (curLayer === 'street') hideMapError();
     });
     layer.on('tileerror', function (e) {
@@ -177,30 +208,40 @@
       dbg.fail++; updateDebug();
       console.warn('[BaibaiMap] 街道瓦片失败 #' + streetErr + '：' +
         (e && e.tile && e.tile.src ? e.tile.src : 'unknown'));
-      if (streetErr > 6 && streetSrc === 0) {
-        console.warn('[BaibaiMap] 高德街道瓦片连续失败，回退 OSM');
-        streetSrc = 1;
-        streetErr = 0;
-        dbg.src = 'OSM'; updateDebug('回退OSM');
-        useGcj = false; // OSM 是 WGS-84，切回原坐标
-        map.removeLayer(layer);
-        makeStreet();
-        redrawAll();
-        return;
-      }
-      if (streetErr > 6 && streetSrc === 1) showMapError();
+      if (streetErr > 6) fallbackStreet();
     });
     street = layer;
     if (curLayer === 'street') street.addTo(map);
   }
-
+  
+  function fallbackSat() {
+    if (satSrc === 1) { if (satErr > 6 && curLayer === 'sat') showMapError(); return; }
+    console.warn('[BaibaiMap] 高德卫星瓦片不可用（失败或风控占位图），回退 Esri 卫星');
+    satSrc = 1;
+    satErr = 0;
+    updateDebug('回退Esri');
+    if (sat) map.removeLayer(sat);
+    makeSat();
+    redrawAll();
+  }
+  
   function makeSat() {
-    sat = L.tileLayer(
-      'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
-      { maxZoom: 19, subdomains: '1234' },
-    );
-    // P4：卫星层无兜底源，失败打日志；连续失败且当前在卫星层时显示兜底浮层（P6）
-    sat.on('tileload', function () {
+    // 高德卫星被风控时回退 Esri World Imagery（免费免 Key，WGS-84）
+    var url = satSrc === 0
+      ? 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}'
+      : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    var opts = { maxZoom: 19 };
+    if (satSrc === 0) opts.subdomains = '1234';
+    sat = L.tileLayer(url, opts);
+    // P4：失败打日志；连续失败且当前在卫星层时显示兜底浮层（P6）
+    sat.on('tileload', function (e) {
+      if (isPlaceholder(e.tile)) {
+        satErr += 1;
+        dbg.fail++; updateDebug('风控占位');
+        console.warn('[BaibaiMap] 卫星瓦片为风控占位图 #' + satErr);
+        if (satErr > 4) fallbackSat();
+        return;
+      }
       satErr = 0;
       dbg.ok++; updateDebug();
       if (curLayer === 'sat') hideMapError();
@@ -210,7 +251,7 @@
       dbg.fail++; updateDebug();
       console.warn('[BaibaiMap] 卫星瓦片失败 #' + satErr + '：' +
         (e && e.tile && e.tile.src ? e.tile.src : 'unknown'));
-      if (satErr > 6 && curLayer === 'sat') showMapError();
+      if (satErr > 6) fallbackSat();
     });
     if (curLayer === 'sat') sat.addTo(map);
   }
@@ -228,6 +269,7 @@
     curLayer = 'street';
     dbg.layer = 'street'; updateDebug('切街道');
     syncButtons();
+    redrawAll(); // 两图层回退阶段可能不同（坐标系不同），切换后必须按新坐标系重绘
   });
   document.getElementById('btn-sat').addEventListener('click', function () {
     if (street && map.hasLayer(street)) map.removeLayer(street);
@@ -235,25 +277,20 @@
     curLayer = 'sat';
     dbg.layer = 'sat'; updateDebug('切卫星');
     syncButtons();
+    redrawAll();
   });
 
   makeStreet();
   makeSat();
   syncButtons();
 
-  /* ---------- 看门狗：页面加载 10s 内街道层 0 张成功 → 立即回退 OSM ----------
-   * 原回退要攒够 6 次 tileerror；拦截层阻塞/弱网下 error 事件来得极慢，地图长时间空白。
-   * 只看 streetOk（不含卫星层），避免误判。 */
+  /* ---------- 看门狗：页面加载 10s 内街道层 0 张真实成功 → 立即回退 OSM ----------
+   * 原回退要攒够 6 次 tileerror；拦截层阻塞/风控占位图下 error 事件不来，地图长时间空白。
+   * 只看 streetOk（占位图不计入，不含卫星层），避免误判。 */
   setTimeout(function () {
     if (streetSrc === 0 && streetOk === 0) {
-      console.warn('[BaibaiMap] 10 秒内街道瓦片零成功，提前回退 OSM');
-      streetSrc = 1;
-      streetErr = 0;
-      dbg.src = 'OSM'; updateDebug('回退OSM');
-      useGcj = false;
-      if (street) map.removeLayer(street);
-      makeStreet();
-      redrawAll();
+      console.warn('[BaibaiMap] 10 秒内街道瓦片零真实成功，提前回退 OSM');
+      fallbackStreet();
     }
   }, 10000);
 
@@ -283,7 +320,9 @@
 
   /* ---------- 当前位置点 + 精度圈 ---------- */
   var me = null, accCircle = null;
+  var rawMe = null; // 原始 WGS-84 坐标（重绘时重新按当前图层坐标系转换，避免二次转换漂移）
   function drawMe(lat, lng, acc) {
+    rawMe = [lat, lng];
     var c = cvt([lat, lng]);
     if (!me) {
       me = L.circleMarker(c, {
@@ -334,10 +373,8 @@
   function redrawAll() {
     drawSegments();
     drawNodes();
-    if (me) {
-      var p = me.getLatLng();
-      drawMe(p.lat, p.lng, 0);
-    }
+    // 用原始 WGS 坐标重绘（不能用 me.getLatLng()——那是已转换坐标，重转会漂移）
+    if (rawMe) drawMe(rawMe[0], rawMe[1], 0);
   }
 
   window.BaibaiMap = {

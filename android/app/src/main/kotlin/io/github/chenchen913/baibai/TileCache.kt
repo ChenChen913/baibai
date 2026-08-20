@@ -9,8 +9,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -24,17 +22,21 @@ import java.util.concurrent.atomic.AtomicInteger
  * - get 无全局锁：预载/下载不再饿死实时瓦片请求（P1 锁饥饿根因修复）；
  * - 网络下载只锁单个 cacheKey：同一张瓦片不重复下载，不同瓦片互不阻塞；
  * - 预载走独立 3 线程池（限流防高德风控），与 WebView 实时请求完全解耦；
- * - UA 与 WebView 完全一致（浏览器默认 UA + baibai 标识），高德请求带 Referer（P5）；
+ * - UA 与 WebView 完全一致（浏览器默认 UA，不加自定义后缀——自定义后缀易触发高德风控）；
  * - 全部失败路径打 logcat（tag=BaibaiMap），真机可定位（P4）。
+ *
+ * 风控占位图防护（真机实测根因，2026-08-20）：
+ * 高德对非浏览器指纹请求返回 HTTP 200 的 1×1 米色占位 PNG（179 字节）——
+ * 「假成功」会毒化缓存、骗过 tileload 计数、让回退看门狗永不触发，地图永远空白。
+ * 凡检出占位图：不入缓存、视同未命中，已中毒的缓存文件读取时自清理。
  */
 class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024) {
 
     private val dir: File = File(context.cacheDir, "tiles").apply { mkdirs() }
 
-    /** 与 WebView 完全一致的 UA（P5）：缓存侧与 WebView 侧请求行为不再分裂 */
-    val userAgent: String = (WebSettings.getDefaultUserAgent(context)
-        ?: "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36") +
-        " baibai/0.1"
+    /** 与 WebView 完全一致的 UA（P5 + 风控修复）：不加自定义后缀，自定义 UA 尾巴是触发高德风控的高危指纹 */
+    val userAgent: String = WebSettings.getDefaultUserAgent(context)
+        ?: "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
 
     /** 每个 cacheKey 一把小锁（P1）：锁粒度 = 单张瓦片 */
     private val keyLocks = ConcurrentHashMap<String, Any>()
@@ -45,11 +47,18 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
     fun fileFor(url: String): File =
         File(dir, Integer.toHexString(TileMath.cacheKey(url).hashCode()) + ".tile")
 
-    /** 只读缓存：无锁（P1），命中即返回，绝不因预载/下载被阻塞 */
+    /** 只读缓存：无锁（P1），命中即返回，绝不因预载/下载被阻塞；读到风控占位图则自清理并视同未命中 */
     fun get(url: String): ByteArray? {
         val f = fileFor(url)
         if (!f.exists()) return null
-        return runCatching { f.readBytes() }.getOrNull()
+        val b = runCatching { f.readBytes() }.getOrNull() ?: return null
+        if (isPlaceholderTile(b)) {
+            // 已中毒的历史缓存（旧版本会把占位图写进来）：删除后视同未命中
+            Log.w(TAG, "清理风控占位图缓存：" + url)
+            runCatching { f.delete() }
+            return null
+        }
+        return b
     }
 
     /** 原子写入（.tmp → rename）；调用方已持单 key 锁 */
@@ -72,10 +81,11 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
             synchronized(lock) {
                 get(url)?.let { return it } // double-check：等锁期间可能已被别的线程写入
                 val bytes = httpGet(url) ?: return get(url)
-                if (bytes.isNotEmpty()) {
+                if (bytes.isNotEmpty() && !isPlaceholderTile(bytes)) {
                     putLocked(url, bytes)
                     return bytes
                 }
+                if (bytes.isNotEmpty()) Log.w(TAG, "风控占位图不入缓存：" + url)
                 return get(url)
             }
         } finally {
@@ -86,21 +96,12 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
     }
 
     /**
-     * 实时瓦片专用限时下载（地图无法显示根因修复）：
-     * 命中秒回；未命中最多等 waitMs，超时返回 null（放行 WebView 自取）但后台继续下载回填。
-     * 原同步 download 在弱网下单张阻塞最长 9s，WebView 网络线程池（4~6 个）被占满 → 地图长时间空白。
+     * 异步回填（拦截层用，fire-and-forget）：
+     * WebView 未命中缓存时放行其自取（与浏览器行为一致，不触发风控），后台同时尝试下载回填，
+     * 下次同瓦片请求即命中。即使下载到占位图，download 的占位图检测也会拒写缓存，无害。
      */
-    fun downloadFast(url: String, waitMs: Long): ByteArray? {
-        get(url)?.let { return it }
-        val fut = livePool.submit<ByteArray?> { download(url) }
-        return try {
-            fut.get(waitMs, TimeUnit.MILLISECONDS)
-        } catch (_: TimeoutException) {
-            null // 后台继续下载，下次同瓦片请求即命中缓存
-        } catch (e: Exception) {
-            Log.w(TAG, "实时瓦片等待异常：" + url + "，" + e.message)
-            null
-        }
+    fun backfillAsync(url: String) {
+        livePool.submit<ByteArray?> { runCatching { download(url) }.getOrNull() }
     }
 
     /** 下载 + 异常兜底（预载线程内用，避免任务抛异常；也消除 submit 的 SAM 重载歧义） */
@@ -184,6 +185,24 @@ class TileCache(context: Context, private val maxBytes: Long = 64L * 1024 * 1024
                 f.delete()
             }
         }
+    }
+
+    /**
+     * 高德风控占位图检测：返回 HTTP 200 的 1×1 PNG（179 字节，米色）。
+     * - PNG：解析 IHDR 宽高（字节 16~24 大端），任一维 ≤2 即占位；
+     * - 其他格式（卫星 JPEG 等）：真实瓦片至少 1.5KB+，小于 1KB 一律视为可疑占位。
+     */
+    fun isPlaceholderTile(b: ByteArray): Boolean {
+        if (b.size >= 8 &&
+            b[0] == 0x89.toByte() && b[1] == 0x50.toByte() && b[2] == 0x4E.toByte() && b[3] == 0x47.toByte()
+        ) {
+            if (b.size < 24) return true
+            fun be32(o: Int): Int =
+                ((b[o].toInt() and 0xFF) shl 24) or ((b[o + 1].toInt() and 0xFF) shl 16) or
+                    ((b[o + 2].toInt() and 0xFF) shl 8) or (b[o + 3].toInt() and 0xFF)
+            return be32(16) <= 2 || be32(20) <= 2
+        }
+        return b.size < 1024
     }
 
     companion object {
