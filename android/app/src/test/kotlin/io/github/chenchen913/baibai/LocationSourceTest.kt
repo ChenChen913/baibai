@@ -8,7 +8,6 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.chenchen913.baibai.core.errors.GpsErrorKind
 import io.github.chenchen913.baibai.core.model.Fix
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -107,6 +106,12 @@ class LocationSourceTest {
         push(LocationManager.GPS_PROVIDER, 36.7, 119.1, 8f)
         src.stop()
         assertEquals(0, src.recent(16).size)
-        assertNull(src.lastFix)
+        // 与网页版 P19 一致：清缓冲但保留 lastFix（供 IDLE 态地图居中）
+        assertEquals(8.0, src.lastFix?.acc ?: -1.0, 0.01)
+        // 网关已复位：重启后无 GPS 历史，网络点立即放行
+        src.start(cb)
+        push(LocationManager.NETWORK_PROVIDER, 36.701, 119.101, 50f)
+        assertEquals(2, cb.fixes.size)
+        src.stop()
     }
 }
