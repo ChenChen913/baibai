@@ -4,13 +4,17 @@ on:
   push:
     paths:
       - 'android/**'
-      - '!android/**/*.md' # 纯文档变更不触发构建
+      - '!android/**/*.md' # 负向模式：纯文档变更不触发构建（官方支持的写法）
       - '.github/workflows/android.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

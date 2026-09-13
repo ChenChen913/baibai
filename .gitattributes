@@ -1,0 +1,14 @@
+# 统一换行符：仓库内文本一律 LF。
+# 否则 Windows 端 core.autocrlf=true 的协作者会把整文件改成 CRLF，产生海量无意义 diff。
+* text=auto eol=lf
+
+# 二进制文件不做换行转换（避免损坏）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.apk binary
+*.jar binary
+*.keystore binary
+*.jks binary
