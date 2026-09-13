@@ -34,7 +34,7 @@
 | 层 | 选型 |
 |---|---|
 | 语言/构建 | TypeScript（严格模式）+ Vite；**无框架、零运行时依赖** |
-| 测试 | vitest（145 项单测）+ jsdom（UI 冒烟）+ fake-indexeddb |
+| 测试 | vitest（156 项单测）+ jsdom（UI 冒烟）+ fake-indexeddb |
 | 定位 | 浏览器 Geolocation API（手机自带 GPS/北斗；无高精度差分设备） |
 | 存储 | IndexedDB（活跃检查点 / 历史会话 / 今年清单）+ JSON 全量导入导出 |
 | 可视化 | **Leaflet + OpenStreetMap 实时地图** + 自绘 SVG/CSS 动画 |
@@ -43,14 +43,15 @@
 
 ## 运行与启动（网页版）
 
-环境要求：**Node.js ≥ 20**（仅本地开发/构建需要；线上访问零依赖，手机直接打开即可）。
+环境要求：**Node.js ≥ 22.22.2（或 ≥ 24.15.0，推荐 24 LTS）**（仅本地开发/构建需要；线上访问零依赖，手机直接打开即可）。
+> 版本下限由测试依赖决定：`jsdom@30` 要求 `^22.22.2 || ^24.15.0 || >=26`。用 Node 20/22.19 会 `npm ci` 通过但 `npm test` 失败。
 
 ```powershell
 npm install      # 安装开发依赖
-npm run dev      # 本地开发服务器 → http://localhost:5173
+npm run dev      # 本地开发服务器 → http://localhost:3000
 npm run build    # 类型检查 + 生产构建（输出 dist/）
 npm run preview  # 本地生产预览 → http://localhost:4173
-npm test         # vitest 单元测试（145 项）
+npm test         # vitest 单元测试（156 项）
 ```
 
 线上访问：**https://chenchen913.github.io/baibai/**（电脑/手机浏览器均可，纯前端，无后端）。
@@ -60,7 +61,7 @@ npm test         # vitest 单元测试（145 项）
 - **推送即发布**：push 到 `main` 分支自动触发 `.github/workflows/pages.yml` → `npm ci` → `npm test` → `npm run build` → 上传构建产物 → 部署 Pages；
 - Pages 源为 **GitHub Actions（workflow）模式**，无需手动设置；部署地址即仓库 Pages 地址；
 - 仓库：`ChenChen913/baibai`（公开，Apache-2.0）；
-- 备注：本仓库已配置 git 代理（`http.proxy = 127.0.0.1:10810`，国内网络推送需要；`git push` 可直接使用）。
+- 备注：国内网络推送需要配置 git 代理（在本机 `git config` 里设置 `http.proxy`，不要写进仓库）。
 
 ## 许可证
 
@@ -70,6 +71,23 @@ npm test         # vitest 单元测试（145 项）
 
 <details>
 <summary>📜 点击展开更新记录（按时间倒序）</summary>
+
+### 全面体检与缺陷修复（2026-09-13）
+
+> 一次覆盖 Web + Android 全量源码的审查（含实测探针验证与两端逐行对拍），修复 P0×1 / P1×8 及一批 P2/P3。
+> 验收：Web **156 项单测全绿** + `tsc --noEmit` 零错误 + 生产构建通过。
+
+| 项 | 内容 |
+|---|---|
+| **E-1 两端投影坐标系统一** | 实走轨迹按"轨迹点"算包围盒、节点/最优线按"节点"算包围盒 → 同一物理点落在两套坐标系，叠加错位（实测最大 **220px / 480px 画布**，morph 首末点漂移、三线对比失去可比性）。新增 `viewRefPoints()` 统一参考点集，Web `projectToView/buildPlan` 与 Android `Track.projectToView/Playback.buildPlan` 同签名加 `ref` 参数，六个视图全部改传同一 ref；新增 `tests/projection.test.ts`（8 项）锁死契约 |
+| **E-2 实时地图只画入库点** | 记录页 `follow()` 原先无条件把**原始 GPS fix** 塞进地图轨迹，绕过状态机六道过滤闸门 → 坐着不动地图照样画抖动线，按「暂停」又被快照重建纠正（前后不一致）。改为只追加"已入库"点，对齐安卓端 `setTrack(snap.points)` 的正确做法；顺带修：暂停/继续不再抢走用户视野、拖动后暂停自动跟随（「定位回中」恢复）、街道/卫星瓦片源各自独立降级（卫星补 Esri 兜底）、坐标系按当前图层源判定 |
+| **E-3 距离口径统一** | 记录页实时距离用未平滑原始点累加，比成绩单偏大（实测 **+6.2%**）→ 改用与成绩单同源的 `buildEdges` 平滑链（带指纹缓存，暂停期间零开销） |
+| **E-4~E-7 演示 / 回退 / 导入 / 文案** | 演示数据不再落库（原先任何"收拾"都会写进 IndexedDB 且 id 固定，永久占据历史）；Worker 计算失败同步回退（原先永久停在"计算中…"）；导入 JSON 补**字段级校验**（原先只校验 id，缺 `nodes` 的畸形数据会让统计/回顾页抛 TypeError）；历史抽屉日期用 `cnyLabel` 而非硬编码"正月初一"；清单页年份与记录页统一为"拜年日期"所在年 |
+| **E-8~E-14 健壮性与性能** | 分析缓存加 LRU 上限（50）；`statFor` 同步路径补兜底；id 转义进属性并改按 dataset 比较；清单抽屉加**内容指纹**（原先每秒重建整个列表，滚动/点击被打断）；SW 只清理 `baibai-*` 缓存（GitHub Pages 共享源，原先会删掉同源其它项目的 PWA 缓存）；礼花限制并发画布并尊重 `prefers-reduced-motion` |
+| **E-15 跳变点功能修复（两端）** | 跳变点原先"只 return 不入库"→ 回顾页「异常跳变点」在真实记录下**永远为空**（功能悬空）；而 demo 里手工注入的跳变点会让实走距离**虚增 1652m（+86%）**。修复：跳变点入库带 `jump` 标记（可展示/可剔除）+ 独立维护"上一非跳变点"基准（坏点不污染后续判定）+ 所有消费方（`buildEdges`/回放/投影参考集/地图/跟随）跳过 jump 点 |
+| **E-16~E-19 一致性与口径** | 对话框与 HTML 转义抽公共模块 `src/dialog.ts`（原先 5 个文件各复制一份；清单页还用原生 `window.prompt/confirm/alert`）；回顾页用时口径与记录页统一；定位复用时效 10 分钟 → **3 分钟**（复用是拿上次定位当 Home，走远后会定错起点） |
+| **工程与仓库** | CI 权限最小化（build job 不再持有 `pages:write`/`id-token:write`）+ 两个 workflow 加 `timeout-minutes`；README 修正 dev 端口（5173→**3000**）与 Node 要求（**≥22.22.2**，由 `jsdom@30` 的 engines 决定）；删除 `bun.lock`（双锁文件分裂）；`.gitignore` 补密钥模式、新增 `.gitattributes` 固化 LF；移除会被构建发布上线的设计稿 `public/layout-preview.html` |
+| **文档口径统一** | 需求文档 `n≤20` → `n≤16`；IndexedDB"三张表"按实现改为"三个 store"；F-5 撤销按钮已两端移除（数据层保留）；标注"边级异常样本识别"**尚未实现**（避免假完成） |
 
 ### 逻辑链整理与漂移根治（2026-08-20 ~ 21）
 
