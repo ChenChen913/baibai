@@ -19,8 +19,14 @@ export interface PlaybackPlan {
 /** 契约常量（数据格式 §9）：Douglas-Peucker 抽稀容差 2m */
 export const DP_EPS_M = 2;
 
-/** 会话 → 回放计划：各边平滑点合并 → DP 抽稀（保留时间轴）→ 投影视口 */
-export function buildPlan(s: SessionData, w: number, h: number): PlaybackPlan {
+/** 会话 → 回放计划：各边平滑点合并 → DP 抽稀（保留时间轴）→ 投影视口。
+ *  E-1：ref = 统一投影参考点集（viewRefPoints）——传了才与节点标记/最优三线同坐标系。 */
+export function buildPlan(
+  s: SessionData,
+  w: number,
+  h: number,
+  ref?: LatLng[],
+): PlaybackPlan {
   const edges = buildEdges(s);
   const raw: { pos: LatLng; t: number }[] = [];
   for (const e of edges) {
@@ -35,6 +41,8 @@ export function buildPlan(s: SessionData, w: number, h: number): PlaybackPlan {
     keep.map((i) => raw[i].pos),
     w,
     h,
+    0.1,
+    ref,
   );
   const pts = keep.map((i, k) => ({
     x: proj[k].x,

@@ -264,8 +264,14 @@ class RecorderStateTest {
         r.addPoint(far(600.0), 5.0, T0 + 6000) // 攒窗口
         r.addPoint(far(600.0), 5.0, T0 + 7000) // 窗口满 3：第 1 次确认
         r.addPoint(far(600.0), 5.0, T0 + 8000) // 第 2 次确认 → 入库
-        // points 只含 HOME 与 far(600)（真实快速移动/跳变超时后正常记录）
-        assertEquals(2, r.snapshot().points.size)
+        // E-15：跳变点现在也会入库并带 jump 标记（供回顾页"异常跳变点"展示与剔除），
+        // 因此 points = HOME + jump(far500) + far(600)。
+        // 关键：坏点不得成为后续判定的基准——下面断言真实点仍被正常记录
+        val pts = r.snapshot().points
+        assertEquals(3, pts.size)
+        assertEquals(1, pts.count { it.jump == true })
+        assertNull(pts.last().jump)
+        assertEquals(2, pts.count { it.jump != true })
     }
 
     @Test

@@ -73,6 +73,9 @@ class MainActivity : ComponentActivity() {
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching {
+                // 修 J：加 64KB 上限——反复崩溃（崩溃循环）时 appendText 无上限会让日志无限增长占满存储；
+                // 超限即轮转（丢弃旧文件，保留本次崩溃现场）
+                if (log.length() > CRASH_LOG_MAX_BYTES) log.delete()
                 log.appendText(java.time.Instant.now().toString() + " thread=" + t.name + "\n" + e.stackTraceToString() + "\n\n")
             }
             prev?.uncaughtException(t, e)
@@ -86,11 +89,16 @@ private fun readCrashLogAndClear(ctx: Context): String? {
     if (!log.exists() || log.length() == 0L) return null
     val text = runCatching { log.readText() }.getOrNull() ?: return null
     log.delete()
-    return if (text.isBlank()) null else "上次运行出现异常（日志已保留），如频繁发生请反馈"
+    // 修 J：旧文案写「日志已保留」，但上一行就是 log.delete()——文案与行为相反，
+    // 用户按提示去找日志只会扑空。改为如实说明"已记录日志"（不提"保留"）
+    return if (text.isBlank()) null else "上次运行出现异常，已记录日志；如频繁发生请反馈"
 }
 
 private const val PREFS = "baibai_prefs"
 private const val KEY_WHITELIST_SEEN = "whitelist_seen"
+
+/** 修 J：crash.log 大小上限 64KB——反复崩溃时轮转，避免日志无限增长 */
+private const val CRASH_LOG_MAX_BYTES = 64 * 1024L
 
 private sealed interface Screen {
     data object Record : Screen
@@ -137,9 +145,14 @@ fun AppRoot() {
         if (toast?.id == t.id) toast = null
     }
 
-    // 上次崩溃提示（M-4）：读一次即清空日志
-    val crashMsg = remember { readCrashLogAndClear(ctx) }
+    // 上次崩溃提示（M-4）：读一次即清空日志。
+    // 修 K：不能在组合期做文件 IO（违反 Compose 副作用约定，重组会反复读盘）——
+    // 改为在 LaunchedEffect(Unit) 里读取，结果用 mutableStateOf 承载后触发一次 toast
+    var crashMsg by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
+        crashMsg = readCrashLogAndClear(ctx)
+    }
+    LaunchedEffect(crashMsg) {
         crashMsg?.let { toast = ToastMsg(++toastSeq, it) }
     }
 

@@ -3,7 +3,7 @@
 
 import { optimizeSession, scorecard, type Route } from './optimize.js';
 import { buildPlan } from './playback.js';
-import { projectToView } from './track.js';
+import { projectToView, viewRefPoints } from './track.js';
 import { resamplePolyline, routePolyline, type XY } from './polyline.js';
 import type { SessionData } from './state.js';
 
@@ -27,15 +27,18 @@ export interface MorphResult {
 export function analyzeSync(s: SessionData): AnalyzeResult {
   const routes = optimizeSession(s);
   const card = scorecard(s, routes);
-  const plan = buildPlan(s, W, H);
+  // E-1：统一投影参考点集——三线页的实走轨迹与节点/最优线必须同坐标系
+  const plan = buildPlan(s, W, H, viewRefPoints(s));
   return { routes, card, planPts: plan.pts.map((p) => ({ x: p.x, y: p.y })) };
 }
 
 export function morphSync(s: SessionData, routes: Route[]): MorphResult {
+  // E-1：morph 的两条折线必须同坐标系，否则变形动画首末点错位（实测最大 220px）
+  const ref = viewRefPoints(s);
   const flyRoute = routes.find((r) => r.mode === 'fly')!;
   const flyLatLng = routePolyline(s, flyRoute.order);
-  const flyXY = projectToView(flyLatLng, W, H);
-  const plan = buildPlan(s, W, H);
+  const flyXY = projectToView(flyLatLng, W, H, 0.1, ref);
+  const plan = buildPlan(s, W, H, ref);
   return {
     actualRes: resamplePolyline(plan.pts.map((p) => ({ x: p.x, y: p.y })), MORPH_POINTS),
     flyRes: resamplePolyline(flyXY, MORPH_POINTS),

@@ -1,11 +1,13 @@
 /** 回顾页：轨迹回放 + 收拾（改名/合并/拆分/剔除异常点）。UI 层，验收走浏览器/真机。 */
 
 import type { SessionData } from './state.js';
-import { buildEdges, projectToView } from './track.js';
+import type { LatLng } from './geo.js';
+import { buildEdges, projectToView, viewRefPoints } from './track.js';
 import { buildPlan, fractionAt, positionAt, type PlaybackPlan } from './playback.js';
 import { mergeNodes, removePoint, renameNode, splitVisit } from './review.js';
 import { matchPlan, nameCandidates, type Plan } from './plan.js';
 import { ICONS } from './icons.js';
+import { esc } from './dialog.js';
 
 export interface ReviewDeps {
   onBack(): void;
@@ -30,14 +32,6 @@ function fmtDur(ms: number): string {
   return `${Math.floor(s / 60)}分${s % 60}秒`;
 }
 
-function esc(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 export function mountReviewView(
   root: HTMLElement,
   initial: SessionData,
@@ -45,6 +39,8 @@ export function mountReviewView(
 ): void {
   let s = initial;
   let pl: PlaybackPlan = { pts: [], totalMs: 0 };
+  // E-1：统一投影参考点集（轨迹 + 家 + 户）——轨迹与节点标记必须同坐标系，否则叠加错位
+  let ref: LatLng[] = [];
   let playing = false;
   let speed = -1; // -1 = 总览：全程 ≤20 秒自动倍速（默认，快速看路径总览）
   let baseMs = 0;
@@ -110,7 +106,8 @@ export function mountReviewView(
   function refresh(): void {
     stopAnim();
     baseMs = 0;
-    pl = buildPlan(s, W, H);
+    ref = viewRefPoints(s);
+    pl = buildPlan(s, W, H, ref);
     renderTitle();
     renderStats();
     renderSvg();
@@ -129,17 +126,23 @@ export function mountReviewView(
   function renderStats(): void {
     const edges = buildEdges(s);
     const dist = edges.reduce((sum, e) => sum + e.distM, 0);
+    // E-18：用时口径与记录页统一——从点击「开始拜年」起算（含等定位阶段）。
+    // 原先用回放计划的时间跨度（首末抽稀点之差），会少算开始到首个入库点的等待时间，
+    // 同一场记录在记录页与回顾页显示两个不同的时长。
+    const endT = s.points.length > 0 ? s.points[s.points.length - 1].t : s.updatedAt;
+    const totalMs = Math.max(0, endT - s.createdAt);
     $('rv-stats').textContent =
       `共 ${s.nodes.length} 户 · ${s.visits.length} 次到访 · ` +
-      `路程 ${(dist / 1000).toFixed(2)} km · 用时 ${fmtDur(pl.totalMs)}`;
+      `路程 ${(dist / 1000).toFixed(2)} km · 用时 ${fmtDur(totalMs)}`;
   }
 
   function renderSvg(): void {
     const d = pl.pts
       .map((q, i) => `${i === 0 ? 'M' : 'L'}${q.x.toFixed(1)},${q.y.toFixed(1)}`)
       .join(' ');
-    // 家 + 全部户一起投影（单点投影会全部叠在左上角同一处）
-    const projAll = projectToView([s.home, ...s.nodes.map((n) => n.pos)], W, H);
+    // 家 + 全部户一起投影，且与轨迹共用同一参考点集（E-1：单点投影会叠在左上角；
+    // 不同参考点集会与轨迹错位——实测最大 220px/480px）
+    const projAll = projectToView([s.home, ...s.nodes.map((n) => n.pos)], W, H, 0.1, ref);
     const nodeSvg = s.nodes
       .map((n, i) => {
         const pr = projAll[i + 1];

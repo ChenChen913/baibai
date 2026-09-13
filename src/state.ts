@@ -84,6 +84,9 @@ export class RecorderState {
   private smoothBuf: LatLng[] = [];
   // R9：连续确认计数（运行时态，不入快照/检查点——与 smoothBuf 一同从 0 重启）
   private confirmCount = 0;
+  // E-15：上一个"非跳变"入库点。跳变点现在会入库（供回顾页"异常跳变点"展示与剔除），
+  // 但它绝不能作为跳变判定与静止门槛的基准——否则一个坏点会把后续真实点也判成跳变。
+  private lastGood: TrackPoint | null = null;
   // R9.1：本段（start/resume 起）行走起点时刻——静止门槛的"静止时长"只算段内，
   // 不把在户内停留的几分钟算进去（否则出门短走访 <50m 永远追不上门槛，整段零入库丢边）
   private segStartT = 0;
@@ -124,11 +127,29 @@ export class RecorderState {
     const r = new RecorderState(ck.session);
     r.actions = structuredClone(ck.actions ?? []);
     r.segCounter = ck.segCounter ?? 0;
+    // E-15：重建"上一个非跳变入库点"基准（快照里可能含 jump 点）
+    for (let i = r.s.points.length - 1; i >= 0; i--) {
+      if (!r.s.points[i].jump) {
+        r.lastGood = r.s.points[i];
+        break;
+      }
+    }
     return r;
   }
 
   get state(): SessionState {
     return this.s.state;
+  }
+
+  /** 已入库轨迹点数（E-2：地图只能画"已入库"的点——六道过滤闸门之后的点，
+   *  与回放/成绩单口径一致；修复前地图 follow() 无条件画原始 fix，静止抖动也画线） */
+  get pointCount(): number {
+    return this.s.points.length;
+  }
+
+  /** 最后一个已入库轨迹点（无则 null） */
+  get lastPoint(): TrackPoint | null {
+    return this.s.points[this.s.points.length - 1] ?? null;
   }
 
   /** IDLE → WALKING：确定 Home（中位数，允许 fallback） */
@@ -144,6 +165,7 @@ export class RecorderState {
     this.s.finished = false;
     this.smoothBuf = []; // R8：新会话平滑窗口从空开始
     this.confirmCount = 0; // R9：确认链一并清零
+    this.lastGood = null; // E-15：新会话无基准点
     this.segStartT = now; // R9.1：段起点
     this.actions.push({ type: 'start' });
     this.touch(now);
@@ -260,7 +282,9 @@ export class RecorderState {
    * 中位数跟着走）；且窗口未满 3 个样本时候选=原始抖动点；国产 ROM acc 虚标 5m 时门槛过低。
    *
    * ① 跳变丢弃（R7 原样）：距上一入库点 2s 内 >100m（人力不可达，必为 GPS 坏点）
-   *    直接丢弃且不进平滑窗口（防污染中位数），返回值带 jump 标记；
+   *    不进平滑窗口、不更新基准点，**但会入库并带 jump 标记**（E-15：修复前只 return 不入库，
+   *    导致回顾页"异常跳变点"在真实记录下永远为空、整块功能悬空；现在它可被看见与剔除，
+   *    且所有消费方（buildEdges/回放/成绩单/投影参考集）一律跳过 jump 点，不会污染统计）；
    * ② 中位数平滑（R8 原样）：原始 fix 进入滑动窗口（SMOOTH_WINDOW 个），
    *    入库候选 = 窗口各分量中位数（样本 ≥3 才可信，不足用原始值）；
    * ③ 窗口未满不入库（R9 新增）：首点后窗口攒满 3 个样本前一律不入库——
@@ -279,14 +303,16 @@ export class RecorderState {
       throw new Error('非法转移：仅移动中记录轨迹点');
     }
     const seg = `seg${this.segCounter}`;
-    const prev = this.s.points[this.s.points.length - 1];
-    // ① 跳变点：不入库、不进平滑窗口
+    const prev = this.lastGood; // E-15：基准点（不含跳变点）
+    // ① 跳变点：入库带标记（供回顾页展示/剔除），但不进平滑窗口、不做基准
     if (
       prev &&
       now - prev.t < JUMP_DT_MS &&
       haversineM(prev.pos, pos) > JUMP_DIST_M
     ) {
-      return { t: now, pos, acc, seg, jump: true };
+      const jumpPoint: TrackPoint = { t: now, pos, acc, seg, jump: true };
+      this.s.points.push(jumpPoint);
+      return jumpPoint;
     }
     // ② 原始 fix 进滑动窗口，取中位数为入库候选
     this.smoothBuf.push(pos);
@@ -312,6 +338,7 @@ export class RecorderState {
       if (this.confirmCount < MOVE_CONFIRM_N) return p;
     }
     this.s.points.push(p);
+    this.lastGood = p; // E-15：只有非跳变点才成为后续判定的基准
     this.smoothBuf = [cand]; // ⑥ 入库后窗口重置
     this.confirmCount = 0;
     return p;
@@ -338,6 +365,7 @@ export class RecorderState {
         this.segCounter = 0;
         this.smoothBuf = []; // R8：平滑窗口一并清空
         this.confirmCount = 0; // R9：确认链一并清零
+        this.lastGood = null; // E-15：基准点一并复位
         this.segStartT = 0; // R9.1：段起点一并复位
         break;
       case 'pause': {

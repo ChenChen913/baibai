@@ -50,7 +50,9 @@ export function buildEdges(s: SessionData): Edge[] {
     const a = stops[i];
     const b = stops[i + 1];
     if (b.t <= a.t) continue;
-    const raw = s.points.filter((p) => p.t > a.t && p.t <= b.t);
+    // E-15：排除跳变点（它们会入库供回顾页展示/剔除），否则一个 900m 的坏点
+    // 会让实走距离虚增上千公里级的误差（demo 场景实测虚增 1652m / +86%）
+    const raw = s.points.filter((p) => !p.jump && p.t > a.t && p.t <= b.t);
     if (raw.length === 0) continue;
     const smoothed = smoothTrack(raw);
     let distM = 0;
@@ -80,6 +82,26 @@ export interface Bounds {
 
 export const MIN_VIEW_SPAN_M = 60; // R7：回放/回顾投影最小跨度——静止小点团不得被放大充满视口
 
+/**
+ * 统一投影参考点集（E-1 修复）：家 + 全部户 + 全部轨迹点。
+ *
+ * 为什么需要：回放轨迹来自 buildPlan（内部按"轨迹点"算 bounds），而节点标记/最优路线
+ * 来自 projectToView([home, ...nodes])（按"节点"算 bounds）。两组点的包围盒不同时，
+ * 同一物理点在两套投影下坐标不同 → 叠加显示错位（实测最大 220px / 480px 画布，
+ * morph 动画首末点错位、三线对比失去可比性）。
+ *
+ * 约定：同一个会话的所有视图（回放轨迹 / 节点标记 / 最优三线 / morph 重采样）
+ * 必须传同一个 ref，坐标才严格对齐。
+ */
+export function viewRefPoints(s: SessionData): LatLng[] {
+  const out: LatLng[] = [s.home];
+  for (const n of s.nodes) out.push(n.pos);
+  // E-15：跳变点不参与投影参考——一个 900m 外的坏点会把包围盒撑大，
+  // 导致整幅图被缩小、看起来"什么都没画"
+  for (const p of s.points) if (!p.jump) out.push(p.pos);
+  return out;
+}
+
 export function boundsOf(pts: LatLng[]): Bounds | null {
   if (pts.length === 0) return null;
   let minLat = Infinity;
@@ -99,14 +121,17 @@ export function boundsOf(pts: LatLng[]): Bounds | null {
  * 等比投影到视口（北在上、留白 10%），全部点落在 [0,w]×[0,h] 内。
  * R7：跨度下限 MIN_VIEW_SPAN_M（60m）——静止小点团（几米抖动范围）不得被放大充满视口；
  * 仅在任一方向跨度低于下限时以实际中心扩展，大跨度场景投影结果与旧版逐位一致。
+ * E-1：ref 传"统一参考点集"（viewRefPoints）时，本函数只负责投影 pts，
+ * bounds 一律按 ref 计算——同会话多图层叠加必须传同一个 ref。
  */
 export function projectToView(
   pts: LatLng[],
   w: number,
   h: number,
   pad = 0.1,
+  ref?: LatLng[],
 ): { x: number; y: number }[] {
-  const b = boundsOf(pts);
+  const b = boundsOf(ref && ref.length > 0 ? ref : pts);
   if (!b) return [];
   // 米→度换算（等距圆柱近似）：纬度 1° ≈ 111320m；经度 1° ≈ 111320·cos(纬度)
   const cLat = (b.maxLat + b.minLat) / 2;

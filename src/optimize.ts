@@ -2,7 +2,7 @@
 
 import type { LatLng } from './geo.js';
 import { haversineM } from './geo.js';
-import type { Mode, SessionData } from './state.js';
+import { HOME_ID, type SessionData } from './state.js';
 import { buildEdges } from './track.js';
 import { solveTsp } from './tsp.js';
 
@@ -27,13 +27,12 @@ export interface Route {
 interface PairInfo {
   minDist: number | null;
   minTime: number | null;
-  mode: Mode | null;
 }
 
 const pairKey = (a: string, b: string): string => [a, b].sort().join('|');
 
 function posOf(s: SessionData, id: string): LatLng {
-  if (id === 'home') return s.home;
+  if (id === HOME_ID) return s.home;
   const n = s.nodes.find((x) => x.id === id);
   if (!n) throw new Error(`unknown node: ${id}`);
   return n.pos;
@@ -41,7 +40,7 @@ function posOf(s: SessionData, id: string): LatLng {
 
 /** 会话 → 三条最优路线 */
 export function optimizeSession(s: SessionData): Route[] {
-  const ids = ['home', ...s.nodes.map((n) => n.id)];
+  const ids = [HOME_ID, ...s.nodes.map((n) => n.id)];
   const n = ids.length;
   if (n === 1) {
     const empty = (mode: Route['mode']): Route => ({
@@ -58,10 +57,9 @@ export function optimizeSession(s: SessionData): Route[] {
   const pairs = new Map<string, PairInfo>();
   for (const e of buildEdges(s)) {
     const k = pairKey(e.fromId, e.toId);
-    const p = pairs.get(k) ?? { minDist: null, minTime: null, mode: null };
+    const p = pairs.get(k) ?? { minDist: null, minTime: null };
     if (p.minDist === null || e.distM < p.minDist) {
       p.minDist = e.distM;
-      p.mode = e.mode;
     }
     const timeMs = e.arriveT - e.departT;
     if (p.minTime === null || timeMs < p.minTime) p.minTime = timeMs;

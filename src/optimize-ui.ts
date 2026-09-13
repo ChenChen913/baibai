@@ -2,12 +2,13 @@
  * D22.1：重计算（TSP/成绩单/回放计划/morph 重采样）经 compute.ts 走 Worker，无 Worker 环境同步回退 */
 
 import type { SessionData } from './state.js';
-import { projectToView } from './track.js';
+import { projectToView, viewRefPoints } from './track.js';
 import { lerpPolyline, type XY } from './polyline.js';
 import type { Route } from './optimize.js';
 import { analyze, analyzeSync, morph, morphSync, type Card } from './compute.js';
 import { ICONS } from './icons.js';
 import { launchConfetti } from './confetti.js';
+import { esc } from './dialog.js';
 
 const W = 480;
 const H = 560;
@@ -25,9 +26,6 @@ const fmtKm = (m: number): string => `${(m / 1000).toFixed(2)} km`;
 const fmtMin = (sec: number): string =>
   `${Math.floor(sec / 60)} 分 ${Math.round(sec % 60)} 秒`;
 const fmtPct = (p: number): string => `${p.toFixed(0)}%`;
-// P11：标题等插入 innerHTML 的外部数据一律转义
-const esc = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export interface OptimizeDeps {
   onBack(): void;
@@ -81,8 +79,10 @@ export function mountOptimizeView(
   const posOf = (id: string) =>
     id === 'home' ? s.home : s.nodes.find((n) => n.id === id)!.pos;
   // 全部节点一起投影：单点投影会把每个点都当"整个画布"居中 → 所有标记叠在左上角同一处
+  // E-1：与实走轨迹（planPts）共用同一参考点集 viewRefPoints(s)，否则线与节点不同坐标系、
+  // 三线对比失去可比性、morph 动画整体漂移
   const nodeIds = ['home', ...s.nodes.map((n) => n.id)];
-  const projAll = projectToView(nodeIds.map(posOf), W, H);
+  const projAll = projectToView(nodeIds.map(posOf), W, H, 0.1, viewRefPoints(s));
   const proj = (id: string) => projAll[nodeIds.indexOf(id)];
 
   function renderCards(): void {
@@ -284,14 +284,30 @@ export function mountOptimizeView(
     renderAll();
   }
 
+  const syncFallback = (): void => {
+    try {
+      const ar = analyzeSync(s);
+      applyResult(ar, morphSync(s, ar.routes));
+    } catch (e) {
+      console.warn('[optimize]', e);
+      $('opt-cards').innerHTML =
+        '<p class="empty">该记录数据不完整，无法计算三线对比</p>';
+      $('opt-hint').textContent = '';
+    }
+  };
+
   if (typeof Worker === 'undefined') {
     // 无 Worker 环境（jsdom 测试等）：同步回退，保证挂载后立即可交互
-    const ar = analyzeSync(s);
-    applyResult(ar, morphSync(s, ar.routes));
+    syncFallback();
   } else {
-    void analyze(s).then((ar) => {
-      void morph(s, ar.routes).then((mr) => applyResult(ar, mr));
-    });
+    // E-8：Worker 失败（线程异常 / 模块加载失败 / 数据畸形）时同步回退——
+    // 修复前只 reject，页面会永久停在"计算中…"，用户只能刷新
+    analyze(s)
+      .then((ar) => morph(s, ar.routes).then((mr) => applyResult(ar, mr)))
+      .catch((e: unknown) => {
+        console.warn('[optimize] worker 计算失败，回退同步计算', e);
+        syncFallback();
+      });
   }
   renderCards();
 }

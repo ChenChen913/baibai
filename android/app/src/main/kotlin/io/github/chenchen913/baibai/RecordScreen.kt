@@ -89,8 +89,10 @@ import io.github.chenchen913.baibai.core.model.HouseNode
 import io.github.chenchen913.baibai.core.model.LatLng
 import io.github.chenchen913.baibai.core.model.Mode
 import io.github.chenchen913.baibai.core.model.PlanItem
+import io.github.chenchen913.baibai.core.model.SessionData
 import io.github.chenchen913.baibai.core.model.SessionState
 import io.github.chenchen913.baibai.core.model.TrackPoint
+import io.github.chenchen913.baibai.core.track.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -140,12 +142,11 @@ private fun fmtClock(ms: Long): String {
     return "%02d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
 }
 
-/** 实走距离（km）：相邻入库点 haversine 累加（与网页版 render() 口径一致） */
-private fun trackKm(points: List<TrackPoint>): Double {
-    var m = 0.0
-    for (i in 1 until points.size) m += Geo.haversineM(points[i - 1].pos, points[i].pos)
-    return m / 1000.0
-}
+/** E-3：实走距离（km）口径与成绩单/历史列表同源（Track.buildEdges 的平滑链，内部已排除跳变点）。
+ *  原先按"相邻入库原始点 haversine 累加"——比成绩单偏大（网页版实测 +6.2%），
+ *  同一场记录在记录页与复盘页显示两个不同数字。调用方用 remember(session) 缓存，只在会话变化时重算。 */
+private fun trackKmOf(s: SessionData): Double =
+    Track.buildEdges(s).sumOf { it.distM } / 1000.0
 
 /** GPS 徽章 + 灵动岛文案（对齐网页版 render() 的四档判定） */
 private data class GpsUi(val pill: String, val island: String, val dot: Color)
@@ -204,7 +205,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
     val planItems = remember {
         RecorderHub.store.loadPlan(java.time.LocalDate.now().year)?.items ?: emptyList()
     }
-    val distKm = session?.let { trackKm(it.points) } ?: 0.0
+    val distKm = remember(session) { session?.let { trackKmOf(it) } ?: 0.0 }
     val gps = gpsUi(gpsAcc, waiting)
 
     var showDatePicker by remember { mutableStateOf(false) }
@@ -285,7 +286,8 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
                 desc = "总览全路线",
                 onClick = {
                     val snap = RecorderHub.recorder?.snapshot()
-                    if (snap != null && snap.points.size > 1) {
+                    // E-15：地图不画跳变点（它们入库只为回顾页展示/剔除），判据也要基于过滤后的点数
+                    if (snap != null && snap.points.count { it.jump != true } > 1) {
                         mapCtl.exec(
                             "BaibaiMap.setTrack(" + trackJson(snap.points) + "," + segBreaksJson(snap.points) + ")",
                         )
@@ -432,9 +434,17 @@ private fun MapLayer(ctl: MapController, pxHeight: Int) {
 
     val appContext = LocalContext.current.applicationContext
     // 清理旧版遗留的瓦片缓存目录（旧版曾被高德风控占位图毒化；本版不再用缓存，直接清掉释放空间）
+    // 修（P3）：原版每次进记录页都跑 deleteRecursively()——一次性迁移代码常驻，未来若重新启用瓦片
+    // 缓存会被误删。现用 SharedPreferences 标记只跑一次（沿用 RecorderHub 同一个 baibai_prefs）。
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            runCatching { java.io.File(appContext.cacheDir, "tiles").deleteRecursively() }
+            runCatching {
+                val prefs = appContext.getSharedPreferences("baibai_prefs", android.content.Context.MODE_PRIVATE)
+                if (!prefs.getBoolean("tiles_migrated_v1", false)) {
+                    java.io.File(appContext.cacheDir, "tiles").deleteRecursively()
+                    prefs.edit().putBoolean("tiles_migrated_v1", true).apply()
+                }
+            }
         }
     }
 
@@ -468,10 +478,15 @@ private fun MapLayer(ctl: MapController, pxHeight: Int) {
     }
 
     // 增量跟随：每 1.2s 推最新定位点（JS 按时间戳去重，当前段实时增长）；
-    // 等待首个定位期间（还没开始记录）也实时显示当前位置
+    // 开始拜年后等待首个定位期间也实时显示当前位置
     LaunchedEffect(Unit) {
         while (true) {
             delay(1200)
+            // 修（P3）：原版 IDLE（无会话）时也每 1.2s 调一次 BaibaiMap.locate，无谓唤醒 WebView 主线程。
+            // 现只在有会话时才推送，IDLE 直接跳过本轮（循环保留，空转成本降到一次状态读取）。
+            // 注意：必须直读 RecorderHub.session.value，不能复用上方 collectAsState 的局部快照——
+            // LaunchedEffect(Unit) 只启动一次，捕获的局部值会永远停在首帧。
+            if (RecorderHub.session.value == null) continue
             if (pageReady) {
                 val w = webView.value ?: continue
                 val last = RecorderHub.recorder?.snapshot()?.points?.lastOrNull()
@@ -582,7 +597,18 @@ private fun MapLayer(ctl: MapController, pxHeight: Int) {
                 loadUrl("file:///android_asset/baibai_map/map.html")
             }
         },
-        onRelease = {
+        onRelease = { wv ->
+            // 修（P1 内存泄漏）：原版只把引用置空、全仓从未调用 destroy()——每次离开记录页（去历史/
+            // 清单/回顾）都会泄漏一个 WebView（Chromium 原生内存 + Activity 引用），反复进出累积原生内存，
+            // 低端机易 OOM。现按标准顺序释放：停加载 → 载空白页（掐断 JS 定时器/媒体）→ 摘子视图 → destroy。
+            // context 仍用 Activity context（factory 的 ctx）：WebView 属于视图树，用 application context
+            // 会在部分机型上破坏输入法、JS 弹窗（alert/confirm）、文件选择等交互；泄漏由 destroy() 解决。
+            runCatching {
+                wv.stopLoading()
+                wv.loadUrl("about:blank")
+                wv.removeAllViews()
+                wv.destroy()
+            }
             webView.value = null
             ctl.webView = null
         },
@@ -602,10 +628,11 @@ private fun systemLastKnown(context: android.content.Context): LatLng? {
     return LatLng(loc.latitude, loc.longitude)
 }
 
-/** 定位点列表 → JS 参数 JSON（[[lat,lng],...]） */
+/** 定位点列表 → JS 参数 JSON（[[lat,lng],...]）。（E-15：跳过跳变点，不画坏点） */
 private fun trackJson(points: List<TrackPoint>): String {
     val arr = JSONArray()
     for (p in points) {
+        if (p.jump == true) continue
         val pair = JSONArray()
         pair.put(p.pos.lat)
         pair.put(p.pos.lng)
@@ -635,12 +662,16 @@ private fun latLngJson(p: LatLng): String =
 private fun segBreaksJson(points: List<TrackPoint>): String {
     val arr = JSONArray()
     var cur: String? = null
-    for (i in points.indices) {
-        val seg = points[i].seg
-        if (seg != cur) {
-            arr.put(i)
-            cur = seg
+    // E-15：跳过跳变点，且下标必须基于"过滤后的点序列"——与 trackJson 保持同一坐标系，
+    // 否则段起点会错位（用原始 indices 会把跳变点算进去）
+    var idx = 0
+    for (p in points) {
+        if (p.jump == true) continue
+        if (p.seg != cur) {
+            arr.put(idx)
+            cur = p.seg
         }
+        idx++
     }
     return arr.toString()
 }

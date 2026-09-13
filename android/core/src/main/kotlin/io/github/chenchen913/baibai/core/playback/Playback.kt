@@ -15,15 +15,16 @@ data class PlaybackPlan(val pts: List<PlaybackPoint>, val totalMs: Long)
 /** 回放引擎（对应网页版 playback.ts，语义逐位一致） */
 object Playback {
 
-    /** 会话 → 回放计划：各边平滑点合并 → DP 抽稀（保留时间轴）→ 投影视口 */
-    fun buildPlan(s: SessionData, w: Double, h: Double): PlaybackPlan {
+    /** 会话 → 回放计划：各边平滑点合并 → DP 抽稀（保留时间轴）→ 投影视口。
+     *  E-1：ref = 统一投影参考点集（Track.viewRefPoints）——传了才与节点标记/最优三线同坐标系。 */
+    fun buildPlan(s: SessionData, w: Double, h: Double, ref: List<LatLng>? = null): PlaybackPlan {
         val raw = mutableListOf<Pair<LatLng, Long>>()
         for (e in Track.buildEdges(s)) {
             for (p in e.smoothed) raw.add(p.pos to p.t)
         }
         if (raw.isEmpty()) return PlaybackPlan(emptyList(), 0)
         val keep = Smooth.douglasPeuckerKeep(raw.map { it.first }, 2.0)
-        val proj = Track.projectToView(keep.map { raw[it].first }, w, h)
+        val proj = Track.projectToView(keep.map { raw[it].first }, w, h, 0.1, ref)
         val pts = keep.mapIndexed { k, i -> PlaybackPoint(proj[k].x, proj[k].y, raw[i].second) }
         return PlaybackPlan(pts, max(0, pts.last().t - pts.first().t))
     }

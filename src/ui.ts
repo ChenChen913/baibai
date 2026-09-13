@@ -4,6 +4,9 @@ import type { Mode, SessionData } from './state.js';
 import { ICONS } from './icons.js';
 import { launchConfetti } from './confetti.js';
 import type { Plan } from './plan.js';
+import { buildEdges } from './track.js';
+import { cnyLabel, fromDateStr } from './cny.js';
+import { esc, showToast } from './dialog.js';
 
 export interface UiCallbacks {
   onStart(): void;
@@ -40,10 +43,8 @@ export interface Ui {
   openDrawer(type: 'plan' | 'history'): void;
   closeDrawer(type: 'plan' | 'history'): void;
   toast(msg: string): void;
-  confirm(msg: string): boolean;
   setFeedbackOn(on: boolean): void;
   setDateLabel(label: string): void;
-  celebrate(): void;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -61,8 +62,22 @@ function fmt(ms: number): string {
   return `${h}:${m}:${ss}`;
 }
 
-const esc = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/**
+ * E-3：实走总距离（km）——与成绩单/历史列表同源（buildEdges 的平滑链）。
+ * 记录页每秒 render 一次，用 (会话 id, 点数, 更新时间, 户数) 做键缓存：
+ * 只有真正来了新的入库点或状态变化才重算，暂停/静止期间零开销。
+ */
+let distCacheKey = '';
+let distCacheKm = 0;
+function distKmOf(s: SessionData | null): number {
+  if (!s || s.points.length < 2) return 0;
+  const key = `${s.id}|${s.points.length}|${s.updatedAt}|${s.nodes.length}`;
+  if (key !== distCacheKey) {
+    distCacheKm = buildEdges(s).reduce((sum, e) => sum + e.distM, 0) / 1000;
+    distCacheKey = key;
+  }
+  return distCacheKm;
+}
 
 export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   root.innerHTML = `
@@ -333,7 +348,6 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
 
       </div>
     </div>
-    <div id="toast"></div>
   `;
 
   const $ = (id: string): HTMLElement => root.querySelector<HTMLElement>('#' + id)!;
@@ -428,14 +442,8 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     btn.setAttribute('aria-label', on ? '关闭提示音与震动' : '开启提示音与震动');
   }
 
-  let toastTimer: number | undefined;
-  function toast(msg: string): void {
-    const t = $('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => t.classList.remove('show'), 2400);
-  }
+  // E-20：toast 走全局实现（dialog.ts 的 showToast，挂 body）——
+  // 页面内的 #toast 会随视图切换被销毁，导致跨页/全局异常提示静默消失
 
   let currentPlan: Plan | null = null;
   let lastNodeCount = 0;
@@ -488,24 +496,11 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     $('stat-plan-total').textContent = planTotal > 0 ? `/${planTotal}户` : '户';
     $('stat-time').textContent = fmt(elapsedMs);
 
-    // 计算实走总距离 (km)
-    let distKm = 0;
-    if (s && s.points.length > 1) {
-      let dM = 0;
-      for (let i = 1; i < s.points.length; i++) {
-        const p1 = s.points[i - 1].pos;
-        const p2 = s.points[i].pos;
-        const rad = Math.PI / 180;
-        const dLat = (p2.lat - p1.lat) * rad;
-        const dLng = (p2.lng - p1.lng) * rad;
-        const a =
-          Math.sin(dLat / 2) ** 2 +
-          Math.cos(p1.lat * rad) * Math.cos(p2.lat * rad) * Math.sin(dLng / 2) ** 2;
-        dM += 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      }
-      distKm = dM / 1000;
-    }
-    $('stat-dist').textContent = distKm.toFixed(2); // R9：0.1km 粒度太粗（走几十米看不出变化），改 10m 粒度
+    // 实走总距离（km）——与成绩单/历史列表同源：buildEdges 的平滑链。
+    // E-3：修复前这里用未平滑的原始点逐段 haversine 累加，比成绩单偏大（实测 +6.2%），
+    // 同一场记录在「记录页」与「复盘页」显示两个不同数字。
+    // 结果按 (轨迹点数, 更新时间, 户数) 缓存——记录中每来一个入库点才重算一次。
+    $('stat-dist').textContent = distKmOf(s).toFixed(2);
 
     // 动态 Banner 指示文案
     const bannerText = $('banner-text');
@@ -556,9 +551,26 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
 
   function setPlan(p: Plan | null): void {
     currentPlan = p;
+    lastPlanKey = ''; // 清单变化 → 下次 render 强制重建列表
   }
 
+  /** E-11：清单抽屉列表的"内容指纹"——render() 每秒跑一次，
+   *  修复前无条件 innerHTML 重建整个列表：用户滚动位置被重置、点击被打断、
+   *  100 户清单时每秒重建上百个 DOM 节点。现在只有内容真变了才重建。 */
+  let lastPlanKey = '';
+
   function renderPlanDrawer(s: SessionData | null): void {
+    const planKey = [
+      s?.state ?? '',
+      s?.currentMode ?? '',
+      s?.nodes.length ?? 0,
+      s?.nodes.map((n) => `${n.id}:${n.name}:${n.autoNo}`).join(','),
+      currentPlan?.updatedAt ?? 0,
+      currentPlan?.items.length ?? 0,
+    ].join('|');
+    if (planKey === lastPlanKey) return;
+    lastPlanKey = planKey;
+
     const listEl = $('drawer-plan-list');
     const badgeEl = $('drawer-plan-badge');
     const badgeDot = $('plan-badge-dot');
@@ -696,7 +708,7 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       return `
         <div class="p-3.5 rounded-2xl bg-white border border-stone-200/90 shadow-xs space-y-2.5">
           <div class="flex justify-between items-center">
-            <div class="font-bold text-stone-800 text-xs">${esc(s.date)} · 正月初一</div>
+            <div class="font-bold text-stone-800 text-xs">${esc(s.date)} · ${esc(cnyLabel(fromDateStr(s.date)))}</div>
             <span class="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded">拜访 ${s.nodes.length} 户</span>
           </div>
           <div class="text-xs text-stone-600 bg-stone-50 p-2 rounded-xl">
@@ -738,11 +750,9 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
     setHistorySessions,
     openDrawer,
     closeDrawer,
-    toast,
-    confirm: (m: string) => window.confirm(m),
+    toast: showToast,
     setFeedbackOn,
     setDateLabel,
-    celebrate: () => launchConfetti(50),
   };
 }
 

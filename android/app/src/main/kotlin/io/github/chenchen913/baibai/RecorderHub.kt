@@ -74,12 +74,16 @@ object RecorderHub {
     private var flushTimerStarted = false
     private var lastSessionEmit = 0L // M-5：定位 fix 的 session 快照节流（5s）
 
-    // 首个定位缓冲：攒 3 个高精度 GPS fix（或 10 秒超时）→ 中位数定 Home。
+    // 首个定位缓冲：攒 3 个高精度 **GPS** fix → 中位数定 Home。
     // 网络点坐标系不可靠（国产 ROM 返回 GCJ-02）：混入会把 Home 定错坐标系，
     // 与后续 GPS 轨迹点相距 300~600m——人不动也画出一条长直线（R6 真机根因）；
-    // 故就绪条件与 Home 采样都优先 GPS 点，仅 10s 内拿不到 GPS 时才用网络点兜底（室内）
+    // 修 C：就绪条件**必须**含 GPS 点、Home 采样也只取 GPS 点——旧版 10s 超时后用网络点兜底定 Home
+    // 正是坐标系错的根因（Home 与轨迹错开数百米，finish「距 Home ≤20m」永远失败只能强制结束）
     private val pendingFixes = mutableListOf<Fix>()
     private var pendingStartAt = 0L
+
+    // 修 C：超时仍无 GPS 时的室内提示节流（每 10 秒最多提示一次，不刷屏）
+    private var lastNoGpsHintAt = 0L
 
     // R9（定位只做一次）：最近一次 fix 到达时刻——再次点「开始」时若缓存够新（10 分钟内）
     // 直接复用 source.lastFix 定 Home，不再重新攒 fix 等待。
@@ -87,8 +91,12 @@ object RecorderHub {
     // 只复用 GPS 点（src=="net" 的 GCJ-02 网络点坐标系不可靠，R6 教训）
     private var lastFixArrivedAt = 0L
 
-    // R9：定位缓存时效 10 分钟（object 内直接放常量——Kotlin 不允许独立 object 内嵌 companion）
-    private const val FIX_REUSE_MS = 10 * 60 * 1000L
+    // E-19：定位复用时效。原为 10 分钟——但复用是拿"上次的定位"直接当 Home，
+    // 若用户结束后已经走远（10 分钟足够骑车数公里），整场记录的 Home 都会错。
+    // 收紧到 3 分钟：既保住"结束一次再开始一次"的秒开体验（拜年场景通常间隔几分钟内），
+    // 又把"走远后 Home 定错"的风险压到步行 ~250m / 骑行 ~700m 以内
+    // （object 内直接放常量——Kotlin 不允许独立 object 内嵌 companion；与网页版 FIX_REUSE_MS 同步）
+    private const val FIX_REUSE_MS = 3 * 60 * 1000L
 
     fun init(app: Application) {
         if (this::store.isInitialized) return
@@ -135,8 +143,11 @@ object RecorderHub {
         if (recorder != null) return
         val ck = runCatching { store.loadActive() }.getOrNull()
         if (ck != null && !ck.session.finished) {
+            // 修 F：只置"待恢复"标记，不再提前写 _session——旧版把 WALKING 快照塞进 _session，
+            // 而 recorder 仍为 null，弹窗背后会渲染出「正在记录中」的假界面；
+            // 且这个窗口内 pause/resume/finish 全因 `recorder ?: return` 静默失效（点了没反应）。
+            // 会话快照改由 resumeCheckpoint()/autoResumeFromCheckpoint() 真正恢复后再发布。
             _pendingRestore.value = true
-            _session.value = ck.session
         }
     }
 
@@ -147,6 +158,10 @@ object RecorderHub {
         _pendingRestore.value = false
         _gpsAcc.value = source?.lastFix?.acc
         if (recorder?.currentState == io.github.chenchen913.baibai.core.model.SessionState.WALKING) {
+            // 修 D：恢复 WALKING 会话时必须同时拉起前台服务（与 startPressed 对称）——
+            // 旧版只 ensureSourceRunning()，恢复后的会话没有常驻通知与 PARTIAL_WAKE_LOCK 保护，
+            // 深睡时 10s 检查点定时器不可靠、进程易被再次回收（正是"四层防杀"要解决的场景）
+            startKeepAliveService()
             ensureSourceRunning()
         }
     }
@@ -192,6 +207,7 @@ object RecorderHub {
         if (recorder != null) return
         pendingFixes.clear()
         pendingStartAt = nowMs()
+        lastNoGpsHintAt = 0L // 修 C：新一轮等定位，室内提示节流复位
         startKeepAliveService()
         // R9（定位只做一次）：10 分钟内有 GPS 定位 → 直接复用定 Home，秒开记录，不再重新等待
         val cached = source?.lastFix?.takeIf { it.src != "net" }
@@ -200,6 +216,9 @@ object RecorderHub {
             try {
                 fresh.start(listOf(cached), nowMs(), cached)
             } catch (e: Exception) {
+                // 修 E：start 抛错时必须回收已启动的前台服务——旧版直接 return，
+                // 残留前台服务 + 常驻通知 + WakeLock 却没有任何会话（用户还找不到停止入口）
+                stopKeepAliveService()
                 emit(e.message ?: "定位启动失败")
                 return
             }
@@ -224,7 +243,8 @@ object RecorderHub {
         watchdogJob = scope.launch {
             delay(30_000)
             if (_waiting.value && recorder == null) {
-                emit("还没拿到定位：请检查定位权限、是否在室内")
+                // 修 C：文案与"只认 GPS 定 Home"一致——室内/仅「大致位置」权限都会一直只拿到网络点
+                emit("还没拿到 GPS 定位：请到窗边或户外，并确认已允许「精确位置」")
             }
         }
     }
@@ -330,19 +350,27 @@ object RecorderHub {
         lastFixArrivedAt = nowMs() // R9：记录 fix 到达时刻（供下次「开始」判断缓存时效）
         val r = recorder
         if (r == null && _waiting.value) {
-            // 攒 3 个高精度 GPS fix（或 10 秒超时）→ 中位数定 Home；
-            // src=="net" 的网络点坐标系不可靠（GCJ-02），不计入就绪数、不参与 Home 中位数，
-            // 仅当 10s 内拿不到任何 GPS 点时才作为室内兜底使用
+            // 攒 3 个高精度 GPS fix → 中位数定 Home。
+            // 修 C：src=="net" 的网络点（国产 ROM 为 GCJ-02）只用于 gpsAcc 显示与室内兜底提示，
+            // 不计入就绪数、也绝不参与 Home 计算
             pendingFixes.add(f)
+            while (pendingFixes.size > 32) pendingFixes.removeAt(0) // 修 C：室内等待可能很久，限制缓冲避免无界增长
             val t = nowMs()
             val gpsFixes = pendingFixes.filter { it.src != "net" }
             val goodGps = gpsFixes.count { it.acc <= Constants.GOOD_ACC_M }
-            val ready = goodGps >= 3 || (pendingFixes.isNotEmpty() && t - pendingStartAt >= 10_000)
+            // 修 C（P0）：就绪条件从「3 个好 GPS **或** 10s 超时且有任意点」收紧为「必须有 GPS 点」——
+            // 旧版 10s 内一个 GPS 点都没到时 homeFixes 取网络点集合，而国产 ROM 网络点是 GCJ-02、
+            // 后续 GPS 轨迹是 WGS-84 → Home 坐标系错，家标记与轨迹错开 300~600m（显示层再转一次约 1km），
+            // 且 finish「距 Home ≤20m」永远失败，每次结束都要点「强制结束」。
+            // 现在：3 个高精度 GPS 点即开始；超时只在"已有 GPS 点"时兜底（GPS 点精度再差也是 WGS-84，
+            // 坐标系正确）；一个 GPS 点都没有就继续等待 + 室内提示，绝不用网络点定 Home。
+            val timedOut = t - pendingStartAt >= 10_000
+            val ready = gpsFixes.isNotEmpty() && (goodGps >= 3 || timedOut)
             if (ready) {
-                val homeFixes = if (gpsFixes.isNotEmpty()) gpsFixes else pendingFixes
+                val homeFixes = gpsFixes // 修 C：Home 一律只取 GPS 点，网络点永不参与
                 val fresh = RecorderState.fresh(_bizDate.value, pendingStartAt) // R9：用时从点击「开始」起算（含等定位阶段）
                 try {
-                    fresh.start(homeFixes.toList(), t, f)
+                    fresh.start(homeFixes.toList(), t, gpsFixes.lastOrNull())
                 } catch (e: Exception) {
                     pendingFixes.clear()
                     emit(e.message ?: "定位启动失败")
@@ -356,6 +384,12 @@ object RecorderHub {
                 _session.value = fresh.snapshot()
                 pendingFixes.clear()
                 emit("开始记录！到一户按「暂停」")
+            } else if (timedOut && t - lastNoGpsHintAt >= 10_000) {
+                // 修 C：超时仍无任何 GPS 点 → 绝不用网络点定 Home，保持 _waiting（既不卡死也不定错坐标系），
+                // 每 10 秒重复提示一次；用户走到窗边/户外攒到 GPS 点后自动开始记录。
+                // （等待期间记录页仍显示「开始拜年记录」主按钮，再点一次即重新等待，不会无路可退）
+                lastNoGpsHintAt = t
+                emit("室内可能搜不到卫星，请到窗边或户外；仅授予「大致位置」权限也会搜不到 GPS")
             }
             return
         }
@@ -467,6 +501,7 @@ object RecorderHub {
         _session.value = null
         _gpsAcc.value = null
         lastFixArrivedAt = 0 // R9：缓存定位时效一并重置，防跨用例污染
+        lastNoGpsHintAt = 0 // 修 C：室内提示节流一并重置，防跨用例污染
         watchdogJob?.cancel()
         if (clearStore) {
             runCatching {

@@ -76,7 +76,20 @@ class JsonStore(
     fun loadPlan(year: Int): Plan? {
         val f = File(dir, "$PLANS_DIR/$year.json")
         if (!f.exists()) return null
-        return json.decodeFromString(Plan.serializer(), f.readText())
+        // 修（P2 首屏崩溃）：原版直接 decodeFromString、无任何兜底——plans/<year>.json 半截/损坏会让调用点
+        // （RecordScreen＝记录页/首屏、ReviewScreen、PlanScreen）直接崩、App 无法自救。现与 listSessions() 同口径：
+        // runCatching + getOrNull，坏文件按「无清单」返回 null，调用点自然走新建清单路径。
+        // 另把损坏文件改名备份成 <year>.json.corrupt 便于排查：后缀不是 .json，不会被 listPlans()/导入误读；
+        // 改名后原文件即不存在，只有再次写坏才会再产生一份（先 delete 旧的，只留最近样本、不堆积）。
+        return runCatching { json.decodeFromString(Plan.serializer(), f.readText()) }
+            .getOrElse {
+                runCatching {
+                    val bak = File(f.parentFile, f.name + ".corrupt")
+                    bak.delete()
+                    f.renameTo(bak)
+                }
+                null
+            }
     }
 
     fun listPlans(): List<Plan> {

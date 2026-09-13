@@ -107,4 +107,60 @@ describe('db', () => {
       ),
     ).rejects.toThrow(/id/);
   });
+
+  // E-9：字段级校验——修复前只校验 app/version/id，一份 id 合法但缺 nodes/points 的 JSON
+  // 会被整体写库，之后历史统计与回顾页渲染时抛 TypeError（实测 analyzeSync 直接崩）
+  it('导入拒绝：会话缺 nodes/points 等关键字段', async () => {
+    const base = { id: 'ok_1', year: 2026, date: '2026-02-17' };
+    const bad = [
+      { ...base }, // 缺一切数组与 home
+      { ...base, nodes: [], visits: [], points: [] }, // 缺 home
+      {
+        ...base,
+        nodes: undefined,
+        visits: [],
+        points: [],
+        home: { lat: 31, lng: 121 },
+        createdAt: 0,
+        updatedAt: 0,
+        state: 'FINISHED',
+        currentMode: 'walk',
+        finished: true,
+      }, // nodes 不是数组
+    ];
+    for (const s of bad) {
+      await expect(
+        importAllJson(JSON.stringify({ app: 'baibai', version: 1, sessions: [s] })),
+      ).rejects.toThrow(/不完整/);
+    }
+    // 结构完整的会话仍可正常导入
+    const good = {
+      ...base,
+      nodes: [],
+      visits: [],
+      points: [],
+      home: { lat: 31, lng: 121 },
+      createdAt: 0,
+      updatedAt: 0,
+      state: 'FINISHED',
+      currentMode: 'walk',
+      finished: true,
+    };
+    await expect(
+      importAllJson(JSON.stringify({ app: 'baibai', version: 1, sessions: [good] })),
+    ).resolves.toBe(1);
+  });
+
+  it('导入拒绝：清单条目缺名字', async () => {
+    await expect(
+      importAllJson(
+        JSON.stringify({
+          app: 'baibai',
+          version: 1,
+          sessions: [],
+          plans: [{ year: 2026, createdAt: 0, updatedAt: 0, items: [{ pos: null }] }],
+        }),
+      ),
+    ).rejects.toThrow(/清单/);
+  });
 });

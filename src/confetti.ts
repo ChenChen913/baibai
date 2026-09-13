@@ -25,7 +25,20 @@ const CNY_COLORS = [
   '#fef08a', // 金白
 ];
 
+/** E-14：同时存在的礼花画布上限——快速连点不再叠加多层全屏 canvas */
+const MAX_LIVE_CANVASES = 2;
+let liveCanvases = 0;
+
 export function launchConfetti(count = 45): void {
+  // E-14：尊重系统「减少动态效果」设置（无障碍），并限制并发画布数
+  if (
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {
+    return;
+  }
+  if (liveCanvases >= MAX_LIVE_CANVASES) return;
+
   const canvas = document.createElement('canvas');
   canvas.className = 'baibai-confetti-canvas';
   canvas.style.cssText =
@@ -38,6 +51,15 @@ export function launchConfetti(count = 45): void {
     return;
   }
   const ctx: CanvasRenderingContext2D = rawCtx;
+  liveCanvases += 1;
+
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    canvas.remove();
+    liveCanvases = Math.max(0, liveCanvases - 1);
+  };
 
   const dpr = window.devicePixelRatio || 1;
   const w = window.innerWidth;
@@ -73,7 +95,7 @@ export function launchConfetti(count = 45): void {
     if (!startTime) startTime = now;
     const elapsed = now - startTime;
     if (elapsed > duration || particles.length === 0) {
-      canvas.remove();
+      finish();
       return;
     }
 
@@ -118,4 +140,6 @@ export function launchConfetti(count = 45): void {
   }
 
   requestAnimationFrame(loop);
+  // 兜底回收：页面切到后台时 rAF 不触发，光靠 loop 会让画布常驻并占住并发额度
+  window.setTimeout(finish, duration + 1500);
 }

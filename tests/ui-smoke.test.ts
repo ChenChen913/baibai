@@ -5,6 +5,7 @@ import { mountPlanView } from '../src/plan-ui.js';
 import { mountReviewView } from '../src/review-ui.js';
 import { mountOptimizeView } from '../src/optimize-ui.js';
 import { generateDemoSession } from '../src/demo.js';
+import type { Plan } from '../src/plan.js';
 
 function makeRoot(): HTMLElement {
   document.body.innerHTML = '<div id="app"></div>';
@@ -95,20 +96,36 @@ describe('记录页事件绑定（回归：曾因 querySelector 缺 # 导致全�
 });
 
 describe('各视图挂载不抛错且关键按钮可用', () => {
-  it('清单视图：返回 / 添加', async () => {
+  it('清单视图：返回 / 添加（应用内对话框，不再用 window.prompt）', async () => {
+    const savePlan = vi.fn(async (_p: Plan) => {});
     const deps = {
       onBack: vi.fn(),
       loadPlan: vi.fn(async () => undefined),
-      savePlan: vi.fn(async () => {}),
+      savePlan,
       listSessions: vi.fn(async () => []),
     };
-    mountPlanView(makeRoot(), 2027, deps);
+    const root = makeRoot();
+    mountPlanView(root, 2027, deps);
     document.querySelector<HTMLElement>('#pl-back')!.click();
     expect(deps.onBack).toHaveBeenCalledTimes(1);
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('张叔家');
+
+    // E-16：添加一户改走应用内对话框（与安卓端 Compose 对话框观感一致）
     document.querySelector<HTMLElement>('#pl-add')!.click();
-    expect(promptSpy).toHaveBeenCalledTimes(1);
     await Promise.resolve();
+    const overlay = document.querySelector<HTMLElement>('.dlg-overlay');
+    expect(overlay, '应弹出应用内对话框').toBeTruthy();
+    const input = overlay!.querySelector<HTMLInputElement>('input')!;
+    expect(input).toBeTruthy();
+    input.value = '张叔家';
+    overlay!.querySelector<HTMLButtonElement>('button.primary')!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(savePlan).toHaveBeenCalledTimes(1);
+    const saved = savePlan.mock.calls[0][0];
+    expect(saved.items).toHaveLength(1);
+    expect(saved.items[0].name).toBe('张叔家');
+    expect(document.querySelector('.dlg-overlay'), '确定后对话框应关闭').toBeNull();
   });
 
   it('回顾视图：三线对比入口与返回', () => {

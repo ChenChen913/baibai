@@ -33,7 +33,8 @@ interface LocationSource {
  * - 首定 Home 用网络点（GPS 冷启动慢）→ Home 坐标系错，后续 GPS 点与 Home 相距 300~600m；
  * - 轨迹混入两套坐标系的点 → 人不动也画出一条长直线（真机 v1.0.3 复现）。
  * 策略（R6）：GPS 到过一次后网络点**永久**拒绝（旧 8s 宽限窗口有漏洞：首个 GPS 点到达前、
- * GPS 静默超窗后的网络点仍会混入）；无 GPS 时才用网络点快速首定/室内兜底。
+ * GPS 静默超窗后的网络点仍会混入）；无 GPS 时网络点仅放行供 gpsAcc 显示/室内兜底提示，
+ * 不再参与 Home 定界（修 C 后 Home 一律只由 GPS 点中位数确定，见 RecorderHub.applyFix）。
  */
 class SystemLocationSource(
     private val context: Context,
@@ -44,6 +45,13 @@ class SystemLocationSource(
     private var last: Fix? = null
     private var running = false
     private var cb: LocationCallbacks? = null
+
+    /** 修 B：已成功注册的 provider 集合。
+     *  running 由"是否有源注册成功"决定（任一成功即视为可用），stop() 据此无条件摘除监听——
+     *  旧版 running 写在两次 requestLocationUpdates 之后：GPS 注册成功而网络注册抛异常时 running 仍为 false，
+     *  stop() 首行 `if (!running) return` 直接早退 → lm.removeUpdates(listener) 永不执行，
+     *  GPS 监听器永久泄漏（耗电），且 active 恒 false 导致反复重注册。 */
+    private val registered = mutableSetOf<String>()
 
     /** 本次运行是否到过 GPS 点；到过一次后网络点（GCJ-02）永久拒绝——
      * 旧「8s 宽限窗口」有致命漏洞：首个 GPS 点到达**前**的网络点照样进缓冲，
@@ -98,42 +106,64 @@ class SystemLocationSource(
             cb.onError(GpsErrorKind.UNAVAILABLE, "定位服务不可用")
             return
         }
-        try {
-            // GPS + 网络双源：GPS 民码误差大/首定慢，网络定位（WiFi/基站）互补；
-            // 两个源的点一起进缓冲做中位数，Home/户点/结束判定都更稳（实机 17m 偏差主因之一）
-            @Suppress("MissingPermission")
-            lm.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                1000L,
-                0f,
-                listener,
-                Looper.getMainLooper(),
-            )
-            @Suppress("MissingPermission")
-            lm.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER,
-                1000L,
-                0f,
-                listener,
-                Looper.getMainLooper(),
-            )
-            running = true
-            @Suppress("MissingPermission")
-            lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let {
-                last = Fix(LatLng(it.latitude, it.longitude), it.accuracy.toDouble(), "gps")
+        // 修 A：GPS 与 NETWORK 拆成各自独立的注册（修 A/B 见 registerProvider）——
+        // 旧版两个 requestLocationUpdates 塞在同一个 try：Android 12+ 用户只给"大致位置"(COARSE) 时
+        // 先注册的 GPS 会抛 SecurityException 直接跳到 catch，NETWORK 永不注册 → 用户完全拿不到定位
+        // （MainActivity 的权限判定接受仅 COARSE）。故先注册 NETWORK（COARSE 权限即可满足），再注册 GPS；
+        // 只要任一成功就认为定位源可用，失败的源只记错误、不打断另一个。
+        var err = registerProvider(lm, LocationManager.NETWORK_PROVIDER)
+        val gpsErr = registerProvider(lm, LocationManager.GPS_PROVIDER)
+        // 网络源已可用时不上报 GPS 的失败：仅 COARSE 权限属正常情形，误报权限错误会吓到用户
+        if (err == null) err = gpsErr
+        if (registered.isEmpty()) {
+            // 修 A：两个源全部注册失败 → 上报（优先权限文案），running 保持 false
+            cb.onError(err?.first ?: GpsErrorKind.UNAVAILABLE, err?.second ?: "unavailable")
+            return
+        }
+        // 末次已知 GPS 点：仅作 IDLE 态地图居中/首定复用的参考。
+        // 只在 GPS 源注册成功（说明具备 FINE 权限、坐标未被模糊化）时才取——与旧版语义一致
+        // （旧版靠同一个 try 兜住 SecurityException，拆分后必须自带保护，否则异常会逃出 start()）
+        if (registered.contains(LocationManager.GPS_PROVIDER)) {
+            try {
+                @Suppress("MissingPermission")
+                lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let {
+                    last = Fix(LatLng(it.latitude, it.longitude), it.accuracy.toDouble(), "gps")
+                }
+            } catch (_: SecurityException) {
+                // 取不到历史点不影响本次启动（仅少了 IDLE 态地图居中参考）
             }
+        }
+    }
+
+    /**
+     * 修 A/B：注册单个 provider，每个 provider 各自独立的 try/catch。
+     * 成功 → 记入 registered、置 running=true 并返回 null；失败 → 返回 (错误类型, 信息)，不影响另一个源。
+     * 修 B：running 在**每次注册成功时**立刻置位，保证 stop() 一定能摘掉已注册的监听。
+     */
+    private fun registerProvider(lm: LocationManager, provider: String): Pair<GpsErrorKind, String>? {
+        try {
+            @Suppress("MissingPermission")
+            lm.requestLocationUpdates(provider, 1000L, 0f, listener, Looper.getMainLooper())
+            registered.add(provider)
+            running = true
+            return null
         } catch (e: SecurityException) {
-            cb.onError(GpsErrorKind.DENIED, e.message ?: "no permission")
+            return GpsErrorKind.DENIED to (e.message ?: "no permission")
         } catch (e: Exception) {
-            cb.onError(GpsErrorKind.UNAVAILABLE, e.message ?: "unavailable")
+            return GpsErrorKind.UNAVAILABLE to (e.message ?: "unavailable")
         }
     }
 
     override fun stop() {
-        if (!running) return
+        // 修 B：去掉首行 `if (!running) return` 早退——旧版 GPS 注册成功、NETWORK 注册抛异常
+        // （部分 ROM 无该 provider 会抛 IllegalArgumentException）时 running 仍为 false，
+        // stop() 直接返回 → 监听器永久泄漏（耗电）。现在无条件摘除监听并复位状态。
         running = false
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
-        lm.removeUpdates(listener)
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        if (lm != null) {
+            lm.removeUpdates(listener)
+        }
+        registered.clear()
         buffer.clear() // 与网页版 P19 一致：停定位时清空缓冲，避免恢复后 immediate pause 混入旧点
         everGotGps = false // 网关复位：下次启动重新从"无 GPS"开始
     }

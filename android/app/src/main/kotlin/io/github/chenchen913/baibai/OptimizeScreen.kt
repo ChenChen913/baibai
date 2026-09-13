@@ -94,7 +94,10 @@ private val ChipIdleBg = Color(0x99FFFFFF) // 白 60%
 fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
     val routes = remember(session) { Optimize.optimizeSession(session) }
     val card = remember(session) { Optimize.scorecard(session, routes) }
-    val plan = remember(session) { Playback.buildPlan(session, W.toDouble(), H.toDouble()) }
+    // E-1：实走轨迹 / 节点标记 / 最优三线 / morph 全部共用同一投影参考点集，
+    // 否则各图层坐标系不一致（实测最大 220px 错位、三线对比失去可比性）
+    val viewRef = remember(session) { Track.viewRefPoints(session) }
+    val plan = remember(session) { Playback.buildPlan(session, W.toDouble(), H.toDouble(), viewRef) }
     val density = LocalDensity.current.density
 
     var tab by remember { mutableStateOf(RouteMode.WALK_TIME) }
@@ -106,9 +109,9 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
     val route = routes.first { it.mode == tab }
     fun posOf(id: String) = if (id == "home") session.home else session.nodes.first { it.id == id }.pos
     // 全部节点一起投影：单点投影会把每个点各自"居中" → 所有标记叠在左上角同一处（用户实机发现的重叠根因）
-    val projMap: Map<String, XY> = remember(session) {
+    val projMap: Map<String, XY> = remember(session, viewRef) {
         val ids = listOf("home") + session.nodes.map { it.id }
-        val pr = Track.projectToView(ids.map { posOf(it) }, W.toDouble(), H.toDouble())
+        val pr = Track.projectToView(ids.map { posOf(it) }, W.toDouble(), H.toDouble(), 0.1, viewRef)
         ids.mapIndexed { i, id -> id to pr[i] }.toMap()
     }
     fun proj(id: String) = projMap.getValue(id)
@@ -118,9 +121,13 @@ fun OptimizeScreen(session: SessionData, onBack: () -> Unit) {
         Polyline.resamplePolyline(plan.pts.map { XY(it.x, it.y) }, MORPH_POINTS)
     }
     val flyRoute = routes.first { it.mode == RouteMode.FLY }
-    val flyRes = remember(session) {
+    val flyRes = remember(session, viewRef) {
         val flyLatLng = Polyline.routePolyline(session, flyRoute.order)
-        Polyline.resamplePolyline(Track.projectToView(flyLatLng, W.toDouble(), H.toDouble()), MORPH_POINTS)
+        // E-1：与 actualRes（实走轨迹投影）共用同一参考点集，否则 morph 动画首末点整体漂移
+        Polyline.resamplePolyline(
+            Track.projectToView(flyLatLng, W.toDouble(), H.toDouble(), 0.1, viewRef),
+            MORPH_POINTS,
+        )
     }
 
     // 推演动画：逐段点亮

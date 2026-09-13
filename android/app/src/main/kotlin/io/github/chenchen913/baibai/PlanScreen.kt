@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import io.github.chenchen913.baibai.core.model.Plan
 import io.github.chenchen913.baibai.core.model.PlanItem
 import io.github.chenchen913.baibai.core.plan.PlanOps
+import java.util.Locale
 
 private val DescCardBg = Color(0x66FFFFFF) // 白 40%
 private val DescCardBorder = Color(0x33FFFFFF) // 白 20%
@@ -56,8 +57,15 @@ fun PlanScreen(year: Int, onBack: () -> Unit) {
     var showImportConfirm by remember { mutableStateOf(false) }
 
     fun persist(next: Plan) {
-        plan = next
-        RecorderHub.store.savePlan(next)
+        // 修（P2 崩溃）：原版 savePlan 无 try/catch——磁盘满/IO 失败会在点击回调里抛异常直接崩溃。
+        // 现先落盘、成功才更新内存态（不先改内存再回滚）：失败时 UI 仍显示磁盘上的旧清单，
+        // 避免出现「界面改了、重启却没了」的内存态与磁盘态不一致。
+        val saved = runCatching { RecorderHub.store.savePlan(next) }
+        if (saved.isSuccess) {
+            plan = next
+        } else {
+            RecorderHub.toast("清单保存失败，请检查存储空间")
+        }
     }
 
     BaibaiPage {
@@ -137,7 +145,9 @@ fun PlanScreen(year: Int, onBack: () -> Unit) {
                                 .padding(12.dp),
                         ) {
                             Text(
-                                "%02d".format(i + 1),
+                                // 修：原 "%02d".format(...) 未指定 Locale，阿拉伯语等区域会输出本地数字，
+                                // 统一按中国区域格式化，与其余计数文案一致
+                                "%02d".format(Locale.CHINA, i + 1),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black,
                                 color = BaibaiInk.copy(alpha = 0.2f),

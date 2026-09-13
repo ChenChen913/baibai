@@ -26,6 +26,8 @@ import {
 import type { Fix } from './geo.js';
 import { cnyLabel, fromDateStr, toDateStr } from './cny.js';
 import { preloadTileList } from './tiles.js';
+// E-16：对话框与转义函数抽到公共模块（原先 main/ui/review-ui/optimize-ui/plan-ui 各自复制了一份）
+import { confirmDialog, esc as escHtml, showToast } from './dialog.js';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 const gps = new GpsTracker();
@@ -46,9 +48,7 @@ function loadBizDate(): Date {
 }
 let bizDate = loadBizDate();
 
-/** P11：所有插入 innerHTML 的用户/外部数据一律转义 */
-const escHtml = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** P11：所有插入 innerHTML 的用户/外部数据一律转义（实现见 dialog.ts 的 esc） */
 let recorder: RecorderState | null = null;
 let pendingStart = false;
 // 首个定位的缓冲：攒 3 个 fix（或 3 秒）取中位数定 Home——单个 fix 噪声大（±10m+）
@@ -57,7 +57,11 @@ let pendingStartAt = 0;
 // R9（定位只做一次）：最近一次 fix 到达时刻 + 缓存的 fix 本体——
 // 再次点「开始」时若缓存够新（10 分钟内）直接复用定 Home，不再重新等待定位
 let lastFixArrivedAt = 0;
-const FIX_REUSE_MS = 10 * 60 * 1000;
+// E-19：定位复用时效。原为 10 分钟——但复用是拿"上次的定位"直接当 Home，
+// 若用户结束后已经走远（10 分钟足够骑车数公里），整场记录的 Home 都会错。
+// 收紧到 3 分钟：既保住"结束一次再开始一次"的秒开体验（拜年场景通常间隔几分钟内），
+// 又把"走远后 Home 定错"的风险压到步行 ~250m / 骑行 ~700m 以内。
+const FIX_REUSE_MS = 3 * 60 * 1000;
 let wakeLock: { release: () => Promise<void> } | null = null;
 let view: 'record' | 'history' | 'review' | 'optimize' | 'plan' = 'record';
 let mapCtrl: MapController | null = null;
@@ -136,19 +140,21 @@ function maybePreloadTiles(home: { lat: number; lng: number }): void {
 function syncMap(): void {
   if (!mapCtrl || !recorder) return;
   const s = recorder.snapshot;
-  // 段起点下标：走过段淡红、当前段实红粗线（像导航一样实时增长）
+  // E-15：地图不画跳变点（它们入库只为回顾页展示/剔除）——段起点下标基于过滤后的数组
+  const pts = s.points.filter((p) => !p.jump);
   const breaks: number[] = [];
   let curSeg = '';
-  s.points.forEach((p, i) => {
+  pts.forEach((p, i) => {
     if (p.seg !== curSeg) {
       breaks.push(i);
       curSeg = p.seg;
     }
   });
-  mapCtrl.setTrack(s.points.map((p) => p.pos), breaks);
+  mapCtrl.setTrack(pts.map((p) => p.pos), breaks);
   mapCtrl.setNodes(s.home, s.nodes);
   if (s.home.lat !== 0 || s.home.lng !== 0) maybePreloadTiles(s.home);
-  const last = s.points[s.points.length - 1];
+  // E-15：跟随目标取"非跳变"的最后一个点——否则地图会被拉到 900m 外的坏点位置
+  const last = pts[pts.length - 1];
   if (last) mapCtrl.follow(last.pos.lat, last.pos.lng);
   else mapCtrl.follow(s.home.lat, s.home.lng);
 }
@@ -271,7 +277,7 @@ function mountRecord(): Ui {
         const distText = Number.isFinite(res.distM)
           ? `当前位置距 Home 约 ${Math.round(res.distM)} 米`
           : '当前位置无法定位';
-        void confirmDialog('结束拜年', `${distText}，仍要结束吗？`, '强制结束', '取消').then((go) => {
+        void confirmDialog(app, '结束拜年', `${distText}，仍要结束吗？`, '强制结束', '取消').then((go) => {
           if (!go || !recorder) return;
           try {
             recorder.finish(gps.recent(10), now(), true);
@@ -343,7 +349,7 @@ function mountRecord(): Ui {
       });
     },
     onDemoHistory() {
-      showReview(generateDemoSession(), 'record');
+      showReview(generateDemoSession(), 'record', false); // E-4：演示数据不落库
     },
     onImportJson(file) {
       const reader = new FileReader();
@@ -436,6 +442,9 @@ function onFix(f: Fix): void {
   if (pendingStart && !recorder) {
     // 攒 3 个 fix（或 3 秒）→ 中位数定 Home；单个 fix 噪声太大
     pendingFixes.push(f);
+    // E-2 附带修复：等待定位期间也实时显示当前位置（follow 已不再往轨迹里塞原始点，
+    // 可以安全调用）——恢复 README 宣称的"等待定位期间也实时显示当前位置"
+    if (view === 'record' && mapCtrl) mapCtrl.follow(f.pos.lat, f.pos.lng, f.acc);
     if (pendingFixes.length >= 3 || now() - pendingStartAt >= 3000) {
       recorder = new RecorderState({
         date: toDateStr(bizDate),
@@ -463,8 +472,19 @@ function onFix(f: Fix): void {
   }
   if (recorder) {
     try {
+      // E-2：只把"真正入库"的点画到地图上（状态机六道过滤闸门之后），
+      // 与回放/成绩单口径一致——修复前 mapCtrl.follow() 无条件画原始 fix，
+      // 静止抖动也会画线，按「暂停」后又被本函数重建纠正，前后不一致
+      const before = recorder.pointCount;
       recorder.addPoint(f.pos, f.acc, now());
-      if (view === 'record') mapCtrl?.follow(f.pos.lat, f.pos.lng, f.acc);
+      if (view === 'record' && mapCtrl) {
+        if (recorder.pointCount > before) {
+          const p = recorder.lastPoint;
+          // E-15：跳变点也入库（供回顾页剔除），但不画到地图上
+          if (p && !p.jump) mapCtrl.appendTrackPoint(p.pos);
+        }
+        mapCtrl.follow(f.pos.lat, f.pos.lng, f.acc);
+      }
     } catch {
       /* 非 WALKING 状态，忽略 */
     }
@@ -519,7 +539,7 @@ async function doExport(): Promise<void> {
  * 'record'：刚结束复盘/记录页历史抽屉点开 → 返回记录页（可立即开始下一场）
  * 'history'：从历史页列表点开 → 返回历史页（继续翻别的场次）
  */
-function showReview(sess: SessionData, from: 'record' | 'history'): void {
+function showReview(sess: SessionData, from: 'record' | 'history', persist = true): void {
   leaveRecord();
   view = 'review';
   const backTo = (): void => {
@@ -531,7 +551,12 @@ function showReview(sess: SessionData, from: 'record' | 'history'): void {
   };
   mountReviewView(app, sess, {
     onBack: backTo,
-    onSave: (s2) => void saveSession(s2).catch((e) => console.warn('[db]', e)),
+    // E-4：演示会话（id 固定 demo-*）不落库——修复前任何"收拾"操作都会把它写进
+    // IndexedDB，永久占据历史列表并与其他年份的真实记录混淆
+    onSave: (s2) => {
+      if (!persist) return;
+      void saveSession(s2).catch((e) => console.warn('[db]', e));
+    },
     onOptimize: (s2) => {
       view = 'optimize';
       mountOptimizeView(app, s2, {
@@ -551,7 +576,9 @@ function showReview(sess: SessionData, from: 'record' | 'history'): void {
 function showPlanView(): void {
   leaveRecord();
   view = 'plan';
-  mountPlanView(app, new Date().getFullYear(), {
+  // E-5：与记录页清单抽屉用同一个年份口径（拜年日期所在年）。
+  // 修复前这里用系统当前年，跨年设置拜年日期时两处读写的不是同一份清单。
+  mountPlanView(app, bizDate.getFullYear(), {
     onBack: () => {
       view = 'record';
       ui = mountRecord();
@@ -579,21 +606,16 @@ async function showHistory(): Promise<void> {
       <p class="h-hint">导出/导入与安卓版同一格式：安卓记录 → 电脑复盘，或反之。</p>
       <div id="h-summary" class="h-summary"></div>
       <div id="h-list" class="history-list"></div>
-      <div id="toast"></div>
     </div>`;
-  const toastEl = app.querySelector<HTMLElement>('#toast')!;
-  const toast = (msg: string): void => {
-    toastEl.textContent = msg;
-    toastEl.classList.add('show');
-    window.setTimeout(() => toastEl.classList.remove('show'), 2400);
-  };
+  // E-20：toast 用全局实现（挂 body），视图切换后依然可见
+  const toast = showToast;
   app.querySelector<HTMLElement>('#h-back')!.addEventListener('click', () => {
     view = 'record';
     ui = mountRecord();
   });
   app.querySelector<HTMLElement>('#h-demo')!.addEventListener('click', () => {
     // 演示会话不落库，仅在内存中回放/收拾
-    showReview(generateDemoSession(), 'history'); // 历史页点开 → 返回历史页
+    showReview(generateDemoSession(), 'history', false); // E-4：历史页点开 → 返回历史页
   });
   app.querySelector<HTMLElement>('#h-export')!.addEventListener('click', () => {
     void doExport().catch((e: unknown) => toast(e instanceof Error ? e.message : '导出失败'));
@@ -623,13 +645,20 @@ async function showHistory(): Promise<void> {
     list.innerHTML = '<p class="empty">还没有记录。大年初一，出发！</p>';
   } else {
     list.innerHTML = sessions
-      .map((s) => `<button class="history-item" data-id="${s.id}">${escHtml(s.date)} · 计算中…</button>`)
+      .map(
+        (s) =>
+          `<button class="history-item" data-id="${escHtml(s.id)}">${escHtml(s.date)} · 计算中…</button>`,
+      )
       .join('');
     void Promise.all(
       sessions.map(async (s) => ({ s, stat: await statFor(s) })),
     ).then((rows) => {
       rows.forEach(({ s, stat }) => {
-        const el = list.querySelector<HTMLElement>(`[data-id="${s.id}"]`);
+        // E-10：按 dataset 比较而非拼选择器——id 已转义进属性，
+        // 再拼进 querySelector 会被特殊字符破坏（防御一致性）
+        const el = [...list.querySelectorAll<HTMLElement>('[data-id]')].find(
+          (b) => b.dataset.id === s.id,
+        );
         if (el) el.textContent = `${s.date} · ${stat}`;
       });
       renderYearSummary(summary, rows); // P15：历年成绩单 + 绕路率趋势线
@@ -692,8 +721,19 @@ function renderYearSummary(
   el.innerHTML = cards + chart;
 }
 
-/** 会话统计（D22.1 Worker 化 + P26 内存缓存：同一会话多次进历史不重算） */
+/** 会话统计（D22.1 Worker 化 + P26 内存缓存：同一会话多次进历史不重算）。
+ *  E-6：缓存加上限（LRU 淘汰最旧）——修复前 Map 无界增长，长期使用会累积
+ *  每场会话的 routes + planPts（几十 KB 级）。 */
+const ANALYZE_CACHE_MAX = 50;
 const analyzeCache = new Map<string, AnalyzeResult>();
+
+function cacheAnalyze(key: string, ar: AnalyzeResult): void {
+  if (analyzeCache.size >= ANALYZE_CACHE_MAX) {
+    const oldest = analyzeCache.keys().next().value;
+    if (oldest !== undefined) analyzeCache.delete(oldest);
+  }
+  analyzeCache.set(key, ar);
+}
 
 function statFor(s: SessionData): Promise<string> {
   const statOf = (ar: AnalyzeResult): string =>
@@ -702,13 +742,22 @@ function statFor(s: SessionData): Promise<string> {
   const hit = analyzeCache.get(key);
   if (hit) return Promise.resolve(statOf(hit));
   const fill = (ar: AnalyzeResult): string => {
-    analyzeCache.set(key, ar);
+    cacheAnalyze(key, ar);
     return statOf(ar);
   };
   if (typeof Worker === 'undefined') {
-    return Promise.resolve(fill(analyzeSync(s)));
+    // E-7：同步路径也要兜底——导入的畸形数据会让 analyzeSync 抛错，
+    // 修复前该异常会一路冒到 unhandledrejection（整页报错提示）
+    try {
+      return Promise.resolve(fill(analyzeSync(s)));
+    } catch (e) {
+      console.warn('[analyze]', e);
+      return Promise.resolve(`${s.nodes.length} 户`);
+    }
   }
-  return analyze(s).then(fill).catch(() => `${s.nodes.length} 户`);
+  return analyze(s)
+    .then(fill)
+    .catch(() => `${s.nodes.length} 户`);
 }
 
 async function boot(): Promise<void> {
@@ -716,7 +765,13 @@ async function boot(): Promise<void> {
     const ck = await loadActive();
     if (ck && !ck.session.finished) {
       // P17：§7.8 规范对话框（标题/正文/继续/放弃）
-      const resume = await confirmDialog('检测到未完成的拜年记录', '继续记录，还是放弃？', '继续', '放弃');
+      const resume = await confirmDialog(
+        app,
+        '检测到未完成的拜年记录',
+        '继续记录，还是放弃？',
+        '继续',
+        '放弃',
+      );
       if (resume) {
         recorder = RecorderState.restore(ck);
         if (recorder.state === 'WALKING') {
@@ -740,37 +795,7 @@ async function boot(): Promise<void> {
   }
 }
 
-/** P17：应用内确认对话框（替代 window.confirm，§7.8 文案规范） */
-function confirmDialog(title: string, body: string, okLabel: string, cancelLabel: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.className = 'dlg-overlay';
-    const el = document.createElement('div');
-    el.className = 'dlg';
-    const h = document.createElement('h3');
-    h.textContent = title;
-    const p = document.createElement('p');
-    p.textContent = body;
-    const actions = document.createElement('div');
-    actions.className = 'dlg-actions';
-    const ok = document.createElement('button');
-    ok.className = 'primary small';
-    ok.textContent = okLabel;
-    const cancel = document.createElement('button');
-    cancel.className = 'ghost small';
-    cancel.textContent = cancelLabel;
-    actions.append(ok, cancel);
-    el.append(h, p, actions);
-    overlay.appendChild(el);
-    const done = (v: boolean): void => {
-      overlay.remove();
-      resolve(v);
-    };
-    ok.addEventListener('click', () => done(true));
-    cancel.addEventListener('click', () => done(false));
-    app.appendChild(overlay);
-  });
-}
+// P17：应用内确认对话框 —— 实现已抽到 src/dialog.ts（E-16），此处仅保留调用点
 
 // 契约常量（数据格式 §9）：检查点落盘间隔 10s（P22 去魔法数字）
 const CHECKPOINT_MS = 10_000;
@@ -832,11 +857,7 @@ function reportUncaught(kind: string, detail: string): void {
   } catch {
     /* 存储不可用则忽略 */
   }
-  try {
-    ui.toast('出现异常：请稍后重试，必要时刷新页面（进行中的记录不会丢失）');
-  } catch {
-    /* 视图上无 toast 元素时忽略 */
-  }
+  showToast('出现异常：请稍后重试，必要时刷新页面（进行中的记录不会丢失）');
 }
 
 window.addEventListener('error', (e) => {

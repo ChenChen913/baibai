@@ -237,8 +237,14 @@ describe('跳变防护（D22 最小版）', () => {
     r.addPoint(far(600), 5, T0 + 6000); // 攒窗口
     r.addPoint(far(600), 5, T0 + 7000); // 窗口满 3：第 1 次确认
     r.addPoint(far(600), 5, T0 + 8000); // 第 2 次确认 → 入库
-    // points 只含 HOME 与 far(600)（真实快速移动/跳变超时后正常记录）
-    expect(r.snapshot.points).toHaveLength(2);
+    // E-15：跳变点现在也会入库并带 jump 标记（供回顾页"异常跳变点"展示与剔除），
+    // 因此 points = HOME + jump(far500) + far(600)。
+    // 关键：坏点不得成为后续判定的基准——下面断言真实点仍被正常记录
+    const pts = r.snapshot.points;
+    expect(pts).toHaveLength(3);
+    expect(pts.filter((p) => p.jump)).toHaveLength(1);
+    expect(pts[pts.length - 1].jump).toBeUndefined();
+    expect(pts.filter((p) => p.jump !== true)).toHaveLength(2);
   });
 
   it('非 WALKING 状态记点抛错', () => {

@@ -56,7 +56,9 @@ object Track {
             val a = stops[i]
             val b = stops[i + 1]
             if (b.t <= a.t) continue
-            val raw = s.points.filter { it.t > a.t && it.t <= b.t }
+            // E-15：排除跳变点（它们会入库供回顾页展示/剔除），否则一个 900m 的坏点
+            // 会让实走距离虚增（demo 场景实测虚增 1652m / +86%；与网页版 track.ts 一致）
+            val raw = s.points.filter { it.jump != true && it.t > a.t && it.t <= b.t }
             if (raw.isEmpty()) continue
             val smoothed = Smooth.smoothTrack(raw)
             var distM = 0.0
@@ -95,12 +97,38 @@ object Track {
     }
 
     /**
+     * 统一投影参考点集（E-1 修复，与网页版 track.ts `viewRefPoints` 对应）：家 + 全部户 + 全部轨迹点。
+     *
+     * 为什么需要：回放轨迹来自 Playback.buildPlan（内部按"轨迹点"算 bounds），而节点标记/最优路线
+     * 来自 projectToView([home, ...nodes])（按"节点"算 bounds）。两组点包围盒不同时，同一物理点
+     * 在两套投影下坐标不同 → 叠加显示错位（实测最大 220px / 480px 画布，morph 首末点错位）。
+     *
+     * 约定：同一会话的所有视图（回放轨迹 / 节点标记 / 最优三线 / morph 重采样）必须传同一个 ref。
+     */
+    fun viewRefPoints(s: SessionData): List<LatLng> {
+        val out = ArrayList<LatLng>(s.nodes.size + s.points.size + 1)
+        out.add(s.home)
+        for (n in s.nodes) out.add(n.pos)
+        // E-15：跳变点不参与投影参考——一个 900m 外的坏点会把包围盒撑大，
+        // 整幅图被缩小、看起来"什么都没画"（与网页版 track.ts 一致）
+        for (p in s.points) if (p.jump != true) out.add(p.pos)
+        return out
+    }
+
+    /**
      * 等比投影到视口（北在上、留白 10%），全部点落在 [0,w]×[0,h] 内。
      * R7：跨度下限 MIN_VIEW_SPAN_M（60m）——静止小点团（几米抖动范围）不得被放大充满视口；
      * 仅在任一方向跨度低于下限时以实际中心扩展，大跨度场景投影结果与旧版逐位一致（与网页版 track.ts 同步）。
+     * E-1：ref 传"统一参考点集"（viewRefPoints）时只投影 pts，bounds 一律按 ref 计算。
      */
-    fun projectToView(pts: List<LatLng>, w: Double, h: Double, pad: Double = 0.1): List<XY> {
-        val b = boundsOf(pts) ?: return emptyList()
+    fun projectToView(
+        pts: List<LatLng>,
+        w: Double,
+        h: Double,
+        pad: Double = 0.1,
+        ref: List<LatLng>? = null,
+    ): List<XY> {
+        val b = boundsOf(if (ref != null && ref.isNotEmpty()) ref else pts) ?: return emptyList()
         // 米→度换算（等距圆柱近似）：纬度 1° ≈ 111320m；经度 1° ≈ 111320·cos(纬度)
         val cLat = (b.maxLat + b.minLat) / 2
         val cLng = (b.maxLng + b.minLng) / 2

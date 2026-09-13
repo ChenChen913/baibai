@@ -18,8 +18,12 @@ self.addEventListener('activate', (e) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => k !== CACHE && k !== TILE_CACHE)
-            .map((k) => caches.delete(k)),
+            // E-12：只清理本应用自己的旧版本缓存。GitHub Pages 是共享源
+            // （<user>.github.io 下所有项目同源），修复前会把该源上其它项目的
+            // PWA 缓存一并删除；同时给每个 delete 加 catch，避免单个失败
+            // 让整个 waitUntil reject 导致 SW 激活失败。
+            .filter((k) => k.startsWith('baibai-') && k !== CACHE && k !== TILE_CACHE)
+            .map((k) => caches.delete(k).catch(() => false)),
         ),
       )
       .then(() => self.clients.claim()),

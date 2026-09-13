@@ -25,9 +25,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +43,10 @@ import io.github.chenchen913.baibai.core.model.SessionData
 import io.github.chenchen913.baibai.core.optimize.Optimize
 import java.io.File
 import java.time.LocalDate
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val GlassCardBg = Color(0x80FFFFFF) // 白 50%
 private val GlassCardBorder = Color(0x4DFFFFFF) // 白 30%
@@ -50,8 +56,28 @@ private val GlassCardBorder = Color(0x4DFFFFFF) // 白 30%
 @Composable
 fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
     val ctx = LocalContext.current
-    val sessions = remember { mutableStateOf(RecorderHub.store.listSessions()) }
+    val scope = rememberCoroutineScope()
+    // 修（P1 性能/ANR）：原版在组合期、主线程同步跑 store.listSessions()（读盘 + JSON 解码全部会话）
+    // 并对每条记录现算 Optimize.optimizeSession（内含 3 次 Held-Karp 精确解，n≤16 时每次分配 8MB+ dp 数组）
+    // + Optimize.scorecard；而 onBack/onOpen 是不稳定 lambda，AppRoot 每次重组（例如弹一次 toast）
+    // 都会重跑整表——多年记录的用户打开历史页就可能白屏数秒甚至 ANR（网页版同一计算明确放在 Web Worker）。
+    // 现改为：IO 线程读盘、Default 线程算统计，算完切回主线程赋值；列表项渲染时只查表。
+    val sessions = remember { mutableStateOf<List<SessionData>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) } // 首帧未读完时显示「读取中」，避免误报「还没有记录」
+    var stats by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var message by remember { mutableStateOf<String?>(null) }
+
+    /** 重载会话列表 + 逐条统计：全部在后台线程算，算完回主线程赋值（导入后刷新也走这里） */
+    fun reloadSessions() {
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { RecorderHub.store.listSessions() }
+            sessions.value = list
+            loaded = true
+            stats = withContext(Dispatchers.Default) { sessionStats(list) }
+        }
+    }
+
+    LaunchedEffect(Unit) { reloadSessions() }
 
     fun doExport() {
         runCatching {
@@ -76,7 +102,9 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
                 ctx.contentResolver.openInputStream(uri)?.use { ins ->
                     val text = ins.readBytes().toString(Charsets.UTF_8)
                     val n = RecorderHub.store.importAllJson(text)
-                    sessions.value = RecorderHub.store.listSessions()
+                    // 修：导入后不再在主线程同步 listSessions()（要解码全部会话 JSON），
+                    // 改为交给 reloadSessions() 在 IO 线程重读、Default 线程重算统计
+                    reloadSessions()
                     message = "已导入 $n 场拜年记录"
                 } ?: run { message = "无法读取文件" }
             }.onFailure { message = "导入失败：${it.message}" }
@@ -135,7 +163,10 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
 
             Spacer(Modifier.height(24.dp))
 
-            if (sessions.value.isEmpty()) {
+            if (!loaded) {
+                // 修：会话列表改为后台线程读取，首帧先显示读取中（否则会闪一下「还没有记录」）
+                Text("正在读取历史记录…", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BaibaiInk.copy(alpha = 0.6f))
+            } else if (sessions.value.isEmpty()) {
                 Text("还没有记录。大年初一，出发！", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BaibaiInk.copy(alpha = 0.6f))
             } else {
                 Column(
@@ -143,11 +174,8 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     sessions.value.forEach { s ->
-                        val stat = runCatching {
-                            val routes = Optimize.optimizeSession(s)
-                            val c = Optimize.scorecard(s, routes)
-                            "${s.nodes.size} 户 · ${"%.2f".format(c.actualDistM / 1000)} km · 绕路率 ${c.savingsTimePct.toInt()}%"
-                        }.getOrElse { "${s.nodes.size} 户" }
+                        // 修：统计只在后台算一次并缓存进 stats 表，组合期只查表；未算完显示占位
+                        val stat = stats[s.id] ?: "${s.nodes.size} 户 · 计算中…"
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -180,3 +208,15 @@ fun HistoryScreen(onBack: () -> Unit, onOpen: (SessionData) -> Unit) {
         }
     }
 }
+
+/** 单条会话的统计文案（格式与旧版逐字一致）；内含 Held-Karp 精确解，只能在后台线程调用 */
+private fun sessionStatLine(s: SessionData): String = runCatching {
+    val routes = Optimize.optimizeSession(s)
+    val c = Optimize.scorecard(s, routes)
+    // 修：原 "%.2f".format(...) 未指定 Locale，德语等区域会输出逗号小数点（1,23 km），统一按中国区域
+    "${s.nodes.size} 户 · ${"%.2f".format(Locale.CHINA, c.actualDistM / 1000)} km · 绕路率 ${c.savingsTimePct.toInt()}%"
+}.getOrElse { "${s.nodes.size} 户" } // 单条算失败只退化为户数，不影响整页
+
+/** 会话 id → 统计文案映射：一次算全表，列表项渲染时只查表（未算完显示占位） */
+private fun sessionStats(list: List<SessionData>): Map<String, String> =
+    list.associate { it.id to sessionStatLine(it) }

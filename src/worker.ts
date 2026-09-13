@@ -3,7 +3,7 @@
 
 import { optimizeSession, scorecard, type Route } from './optimize.js';
 import { buildPlan } from './playback.js';
-import { projectToView } from './track.js';
+import { projectToView, viewRefPoints } from './track.js';
 import { resamplePolyline, routePolyline } from './polyline.js';
 import type { SessionData } from './state.js';
 
@@ -34,10 +34,12 @@ const ctx = self as unknown as {
 ctx.onmessage = (e: MessageEvent) => {
   const task = e.data as Task;
   try {
+    // E-1：与 compute.ts 同步——所有投影共用同一参考点集，保证图层叠加不错位
+    const ref = viewRefPoints(task.session);
     if (task.kind === 'analyze') {
       const routes = optimizeSession(task.session);
       const card = scorecard(task.session, routes);
-      const plan = buildPlan(task.session, W, H);
+      const plan = buildPlan(task.session, W, H, ref);
       ctx.postMessage({
         id: task.id,
         kind: 'analyze',
@@ -48,8 +50,8 @@ ctx.onmessage = (e: MessageEvent) => {
     } else {
       const flyRoute = task.routes.find((r) => r.mode === 'fly')!;
       const flyLatLng = routePolyline(task.session, flyRoute.order);
-      const flyXY = projectToView(flyLatLng, W, H);
-      const plan = buildPlan(task.session, W, H);
+      const flyXY = projectToView(flyLatLng, W, H, 0.1, ref);
+      const plan = buildPlan(task.session, W, H, ref);
       ctx.postMessage({
         id: task.id,
         kind: 'morph',

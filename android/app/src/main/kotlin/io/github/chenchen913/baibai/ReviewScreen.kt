@@ -96,7 +96,9 @@ fun ReviewScreen(
         onSave(next)
     }
 
-    val plan = remember(s) { Playback.buildPlan(s, W.toDouble(), H.toDouble()) }
+    // E-1：轨迹（plan）与节点标记（projAll）必须共用同一投影参考点集，否则叠加错位
+    val viewRef = remember(s) { Track.viewRefPoints(s) }
+    val plan = remember(s, viewRef) { Playback.buildPlan(s, W.toDouble(), H.toDouble(), viewRef) }
     val density = LocalDensity.current.density
 
     var playing by remember { mutableStateOf(false) }
@@ -209,7 +211,13 @@ fun ReviewScreen(
                             isFakeBoldText = true
                         }
                         // 家 + 全部户一起投影（单点投影会全部叠在左上角同一处）
-                        val projAll = Track.projectToView(listOf(s.home) + s.nodes.map { it.pos }, W.toDouble(), H.toDouble())
+                        val projAll = Track.projectToView(
+            listOf(s.home) + s.nodes.map { it.pos },
+            W.toDouble(),
+            H.toDouble(),
+            0.1,
+            viewRef, // E-1：与轨迹同坐标系
+        )
                         val homeProj = projAll[0]
                         drawCircle(BaibaiAccent2, radius = 10f, center = Offset(homeProj.x.toFloat(), homeProj.y.toFloat()))
                         drawContext.canvas.nativeCanvas.drawText("家", homeProj.x.toFloat(), homeProj.y.toFloat() + homePaint.textSize * 0.35f, homePaint)
@@ -297,7 +305,8 @@ fun ReviewScreen(
                         var nameText by remember(n.id, n.name) { mutableStateOf(n.name) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "%02d".format(n.autoNo),
+                                // 修：原 "%02d".format(...) 未指定 Locale，阿拉伯语等区域会输出本地数字，统一按中国区域
+                                "%02d".format(java.util.Locale.CHINA, n.autoNo),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Black,
                                 color = BaibaiInk.copy(alpha = 0.3f),

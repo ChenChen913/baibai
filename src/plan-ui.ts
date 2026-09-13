@@ -3,20 +3,15 @@
 import type { Plan } from './plan.js';
 import { planFromSession } from './plan.js';
 import type { SessionData } from './state.js';
+// E-16：应用内对话框 + 公共转义函数（替代 window.alert/confirm/prompt，
+// 与安卓端 Compose 自绘对话框保持一致的观感）
+import { alertDialog, confirmDialog, esc, promptDialog } from './dialog.js';
 
 export interface PlanDeps {
   onBack(): void;
   loadPlan(year: number): Promise<Plan | undefined>;
   savePlan(p: Plan): Promise<void>;
   listSessions(): Promise<SessionData[]>;
-}
-
-function esc(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 export function mountPlanView(root: HTMLElement, year: number, deps: PlanDeps): void {
@@ -41,7 +36,11 @@ export function mountPlanView(root: HTMLElement, year: number, deps: PlanDeps): 
 
   function persist(): void {
     plan.updatedAt = Date.now();
-    void deps.savePlan(plan);
+    // E-17：写盘失败必须让用户知道（原先 loadPlan 无兜底会崩、savePlan 静默失败）
+    void deps.savePlan(plan).catch((e: unknown) => {
+      window.console.warn('[plan]', e);
+      void alertDialog(root, '保存失败', '清单没能保存到本机，请检查存储空间后重试。');
+    });
   }
 
   function render(): void {
@@ -87,19 +86,32 @@ export function mountPlanView(root: HTMLElement, year: number, deps: PlanDeps): 
     // P16：只取真正的往年记录；无往年记录时不得拿当年自己的记录冒充"去年"
     const prev = sessions.find((x) => x.year < year);
     if (!prev) {
-      window.alert('还没有历史拜年记录，无法导入');
+      await alertDialog(root, '无法导入', '还没有历史拜年记录，先去拜一次年吧。');
       return;
     }
-    if (window.confirm(`从 ${prev.date} 的 ${prev.nodes.length} 户生成清单？（会覆盖当前清单）`)) {
+    const ok = await confirmDialog(
+      root,
+      '从去年导入',
+      `从 ${prev.date} 的 ${prev.nodes.length} 户生成清单？（会覆盖当前清单）`,
+      '导入',
+      '取消',
+    );
+    if (ok) {
       plan.items = planFromSession(prev, year).items;
       persist();
       render();
     }
   });
-  $('pl-add').addEventListener('click', () => {
-    const name = window.prompt('新户名字？');
+  $('pl-add').addEventListener('click', async () => {
+    const name = await promptDialog(
+      root,
+      '添加一户',
+      '这户叫什么？（留空则不加，之后也可以再改名）',
+      '',
+      '如：大伯家',
+    );
     if (name === null) return;
-    plan.items.push({ name: name.trim(), pos: null });
+    plan.items.push({ name, pos: null });
     persist();
     render();
   });

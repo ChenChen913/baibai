@@ -48,6 +48,16 @@ class RecorderState private constructor(
     private val visits = visitsInit.toMutableList()
     private val points = pointsInit.toMutableList()
 
+    /** E-15：上一个"非跳变"入库点。跳变点现在会入库（供回顾页"异常跳变点"展示与剔除），
+     *  但它绝不能作为跳变判定与静止门槛的基准——否则一个坏点会把后续真实点也判成跳变。
+     *  与网页版 state.ts 的 lastGood 语义逐位一致。 */
+    private var lastGood: TrackPoint? = null
+
+    init {
+        // E-15：新建会话 points 为空 → null；恢复的会话要从快照里重建基准（快照可能含 jump 点）
+        lastGood = points.lastOrNull { it.jump != true }
+    }
+
     /** R8：中位数平滑窗口（运行时态，不入快照/检查点——崩溃恢复后从空窗重启，无碍） */
     private val smoothBuf = mutableListOf<LatLng>()
 
@@ -147,6 +157,7 @@ class RecorderState private constructor(
         finished = false
         smoothBuf.clear() // R8：新会话平滑窗口从空开始
         confirmCount = 0 // R9：确认链一并清零
+        lastGood = null // E-15：新会话无基准点
         segStartT = now // R9.1：段起点
         actions += Action.Start
         touch(now)
@@ -272,13 +283,15 @@ class RecorderState private constructor(
             throw IllegalStateException("非法转移：仅移动中记录轨迹点")
         }
         val seg = "seg$segCounter"
-        val prev = points.lastOrNull()
-        // ① 跳变点：不入库、不进平滑窗口
+        val prev = lastGood // E-15：基准点（不含跳变点；与网页版 state.ts 一致）
+        // ① 跳变点：入库带标记（供回顾页展示/剔除），但不进平滑窗口、不做基准
         if (prev != null &&
             now - prev.t < Constants.JUMP_DT_MS &&
             Geo.haversineM(prev.pos, pos) > Constants.JUMP_DIST_M
         ) {
-            return TrackPoint(t = now, pos = pos, acc = acc, seg = seg, jump = true)
+            val jumpPoint = TrackPoint(t = now, pos = pos, acc = acc, seg = seg, jump = true)
+            points += jumpPoint
+            return jumpPoint
         }
         // ② 原始 fix 进滑动窗口，取中位数为入库候选
         smoothBuf += pos
@@ -304,6 +317,7 @@ class RecorderState private constructor(
             if (confirmCount < Constants.MOVE_CONFIRM_N) return p
         }
         points += p
+        lastGood = p // E-15：只有非跳变点才成为后续判定的基准
         smoothBuf.clear() // ⑥ 入库后窗口重置
         smoothBuf += cand
         confirmCount = 0
@@ -332,6 +346,7 @@ class RecorderState private constructor(
                 segCounter = 0
                 smoothBuf.clear() // R8：平滑窗口一并清空
                 confirmCount = 0 // R9：确认链一并清零
+                lastGood = null // E-15：基准点一并复位
                 segStartT = 0 // R9.1：段起点一并复位
             }
 
