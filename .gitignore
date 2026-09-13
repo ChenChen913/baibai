@@ -34,3 +34,6 @@ android/captures/
 *.jks
 *.keystore
 android/key.properties
+
+# README 事实台账（写作过程产物，本地维护；如需随仓库维护可删除本行）
+facts.md
