@@ -12,7 +12,12 @@
     <application
         android:label="拜拜"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.Baibai">
+        android:theme="@style/Theme.Baibai"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
+        <!-- allowBackup=false：会话数据含家庭住址坐标与户名，属隐私数据，不进系统云备份；
+             本应用自带 JSON 全量导出/导入（换手机用它），不依赖系统备份 -->
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

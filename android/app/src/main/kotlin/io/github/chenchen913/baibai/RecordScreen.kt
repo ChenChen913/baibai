@@ -139,7 +139,7 @@ private fun resumeGradient(): Brush = Brush.linearGradient(
 
 private fun fmtClock(ms: Long): String {
     val s = ms / 1000
-    return "%02d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60)
+    return "%02d:%02d:%02d".format(java.util.Locale.CHINA, s / 3600, (s % 3600) / 60, s % 60)
 }
 
 /** E-3：实走距离（km）口径与成绩单/历史列表同源（Track.buildEdges 的平滑链，内部已排除跳变点）。
@@ -870,7 +870,8 @@ private fun Dashboard(
             DashCell(label = "实走距离", modifier = Modifier.weight(1f)) {
                 Text(
                     // R9：0.1km 粒度太粗（走几十米看不出变化），改 10m 粒度——与网页版对齐
-                    "%.2f".format(distKm),
+                    // P3：显式指定 Locale，避免非中文区域输出逗号小数点（如 "1,23"）
+                    "%.2f".format(java.util.Locale.CHINA, distKm),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace,

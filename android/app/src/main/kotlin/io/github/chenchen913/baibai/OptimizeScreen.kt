@@ -71,7 +71,7 @@ private const val H = 560f
 private const val MORPH_POINTS = 180
 private const val MORPH_MS = 3000L
 
-private fun fmtKm(m: Double) = "%.2f".format(m / 1000)
+private fun fmtKm(m: Double) = "%.2f".format(java.util.Locale.CHINA, m / 1000)
 private fun fmtMin(sec: Double) = "${(sec / 60).toInt()} 分 ${(sec % 60).toInt()} 秒"
 private fun fmtPct(p: Double) = "${p.toInt()}%"
 
