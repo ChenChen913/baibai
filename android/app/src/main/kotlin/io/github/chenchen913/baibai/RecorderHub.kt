@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import io.github.chenchen913.baibai.core.debug.GpsDecision
 import io.github.chenchen913.baibai.core.errors.GpsErrorKind
 import io.github.chenchen913.baibai.core.model.Constants
 import io.github.chenchen913.baibai.core.model.Fix
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.LocalDate
 
 /**
@@ -58,6 +60,10 @@ object RecorderHub {
     private val _feedbackOn = MutableStateFlow(true)
     val feedbackOn: StateFlow<Boolean> = _feedbackOn
 
+    // 定位实验（GPS Debug）开关：默认关闭（关闭时采集链路零开销）。持久化在 baibai_prefs
+    private val _debugEnabled = MutableStateFlow(false)
+    val debugEnabled: StateFlow<Boolean> = _debugEnabled
+
     // 用户选定的拜年日期（默认今天；记录页徽章可改）
     private val _bizDate = MutableStateFlow(LocalDate.now())
     val bizDate: StateFlow<LocalDate> = _bizDate
@@ -85,6 +91,9 @@ object RecorderHub {
     // 修 C：超时仍无 GPS 时的室内提示节流（每 10 秒最多提示一次，不刷屏）
     private var lastNoGpsHintAt = 0L
 
+    // 定位实验：内存记录追加落盘的节流时刻（每 10 秒最多一次，避免频繁 IO）
+    private var lastDebugFlushAt = 0L
+
     // R9（定位只做一次）：最近一次 fix 到达时刻——再次点「开始」时若缓存够新（10 分钟内）
     // 直接复用 source.lastFix 定 Home，不再重新攒 fix 等待。
     // 用户主诉：结束一次后再点「开始」又要重新等定位；拜年场景两次开始间隔通常只有几分钟。
@@ -103,9 +112,15 @@ object RecorderHub {
         context = app.applicationContext
         store = JsonStore(app.filesDir)
         source = SystemLocationSource(app.applicationContext)
+        // 定位实验：挂上原始定位旁路（在源侧网关之前触发，被网关丢的点也能记录）。
+        // 回调里再判开关——关闭状态下只是多一次布尔判断，不写任何数据。
+        (source as? SystemLocationSource)?.debugSink = { info ->
+            if (_debugEnabled.value) GpsDebugRecorder.onRawLocation(info)
+        }
         val prefs = app.applicationContext
             .getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
         _feedbackOn.value = prefs.getBoolean("feedback_on", true)
+        _debugEnabled.value = prefs.getBoolean("gps_debug_on", false)
         _bizDate.value = prefs.getString("biz_date", null)
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
             ?: LocalDate.now()
@@ -136,6 +151,13 @@ object RecorderHub {
         _feedbackOn.value = on
         context?.getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
             ?.edit()?.putBoolean("feedback_on", on)?.apply()
+    }
+
+    /** 定位实验：开关采集（持久化；只影响实验记录，不影响任何过滤规则） */
+    fun setDebugEnabled(on: Boolean) {
+        _debugEnabled.value = on
+        context?.getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("gps_debug_on", on)?.apply()
     }
 
     /** 启动检查：发现未完成检查点 → 弹"继续/放弃"。H-2：已在记录的进程内（如旋转重建）不再重复弹窗 */
@@ -397,6 +419,25 @@ object RecorderHub {
             try {
                 val t = nowMs()
                 r.addPoint(f.pos, f.acc, t)
+                // 定位实验（GPS Debug）：只记录，不改任何既有语句与判断。
+                // RecorderState 已把本次判定结果写在 lastDecisionLabel() 上（阈值/距离也是它算出来的）。
+                if (_debugEnabled.value) {
+                    val dec = r.lastDecisionLabel()
+                    val accepted = dec == GpsDecision.ACCEPTED.label ||
+                        dec == GpsDecision.ACCEPTED_JUMP.label
+                    val lastStored = if (accepted) r.snapshot().points.lastOrNull() else null
+                    GpsDebugRecorder.onDecision(
+                        fix = f,
+                        decisionLabel = dec,
+                        distFromPrevStoredM = r.lastDistToStoredM(),
+                        thresholdM = r.lastThresholdM(),
+                        storedCount = r.snapshot().points.size,
+                        sessionState = r.currentState.name,
+                        processedLat = lastStored?.pos?.lat,
+                        processedLng = lastStored?.pos?.lng,
+                    )
+                    appendDebugFileThrottled()
+                }
                 // M-5：每秒 fix 不再整树重组——session 快照节流到 5s（状态/户数变化由各动作单独发射）
                 if (t - lastSessionEmit >= 5000) {
                     lastSessionEmit = t
@@ -404,6 +445,19 @@ object RecorderHub {
                 }
             } catch (_: IllegalStateException) {
                 /* 非 WALKING 状态，忽略 */
+                if (_debugEnabled.value) {
+                    // 定位实验：本次定位根本没走到判定（会话不在 WALKING）
+                    GpsDebugRecorder.onDecision(
+                        fix = f,
+                        decisionLabel = GpsDecision.REJECTED_NOT_WALKING.label,
+                        distFromPrevStoredM = null,
+                        thresholdM = null,
+                        storedCount = r.snapshot().points.size,
+                        sessionState = r.currentState.name,
+                        processedLat = null,
+                        processedLng = null,
+                    )
+                }
             }
         }
     }
@@ -432,6 +486,38 @@ object RecorderHub {
         // t0 用会话创建时刻（= 点击「开始」时刻，applyFix 创建时显式传入），不用 points[0].t——
         // 首点迟到会让计时倒退（实机复现：定位稀疏时时间回跳/停滞）
         return (nowMs() - s.createdAt).coerceAtLeast(0)
+    }
+
+    // ---------- 定位实验（GPS Debug） ----------
+
+    /** 定位实验：实时统计（会话态/入库点数取当前 recorder 的实时值；关闭开关时返回空统计） */
+    fun debugStats(): GpsDebugStats {
+        val s = GpsDebugRecorder.stats()
+        val r = recorder
+        return s.copy(
+            currentSessionState = r?.currentState?.name ?: _session.value?.state?.name ?: "IDLE",
+            storedPointCount = r?.snapshot()?.points?.size ?: 0,
+        )
+    }
+
+    /** 定位实验：清空内存记录与 pending（下次落盘写新文件） */
+    fun clearDebug() {
+        GpsDebugRecorder.reset()
+    }
+
+    /** 定位实验：导出 CSV 到 cacheDir/exports（失败返回 null） */
+    fun exportDebugCsv(ctx: Context): File? = GpsDebugRecorder.exportCsv(ctx)
+
+    /** 定位实验：导出 NDJSON 到 cacheDir/exports（失败返回 null） */
+    fun exportDebugJson(ctx: Context): File? = GpsDebugRecorder.exportJson(ctx)
+
+    /** 定位实验：节流把内存新记录追加落盘（后台线程，失败静默） */
+    private fun appendDebugFileThrottled() {
+        val t = nowMs()
+        if (t - lastDebugFlushAt < 10_000) return
+        lastDebugFlushAt = t
+        val c = context ?: return
+        scope.launch { GpsDebugRecorder.appendToFile(c) }
     }
 
     // ---------- 内部 ----------
@@ -502,7 +588,9 @@ object RecorderHub {
         _gpsAcc.value = null
         lastFixArrivedAt = 0 // R9：缓存定位时效一并重置，防跨用例污染
         lastNoGpsHintAt = 0 // 修 C：室内提示节流一并重置，防跨用例污染
+        lastDebugFlushAt = 0 // 定位实验：落盘节流一并重置
         watchdogJob?.cancel()
+        GpsDebugRecorder.reset() // 定位实验：实验记录跨用例隔离
         if (clearStore) {
             runCatching {
                 store.clearActive()

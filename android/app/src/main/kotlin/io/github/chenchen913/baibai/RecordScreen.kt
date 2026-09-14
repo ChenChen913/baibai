@@ -188,7 +188,7 @@ private const val MAP_LOG = "BaibaiMap"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -> Unit) {
+fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -> Unit, onGpsDebug: () -> Unit) {
     val session by RecorderHub.session.collectAsState()
     val waiting by RecorderHub.waiting.collectAsState()
     val gpsAcc by RecorderHub.gpsAcc.collectAsState()
@@ -267,7 +267,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
         ) {
             MapToolBtn(
                 icon = Icons.Filled.MyLocation,
-                desc = "定位回中",
+                desc = "定位回中（长按进入定位实验）",
                 onClick = {
                     val last = RecorderHub.recorder?.snapshot()?.points?.lastOrNull()
                     val fix = RecorderHub.source?.lastFix
@@ -279,6 +279,7 @@ fun RecordScreen(onStartRequest: () -> Unit, onHistory: () -> Unit, onPlan: () -
                         RecorderHub.toast("暂无定位，稍后再试")
                     }
                 },
+                onLongClick = onGpsDebug,
             )
             Spacer(Modifier.height(8.dp))
             MapToolBtn(

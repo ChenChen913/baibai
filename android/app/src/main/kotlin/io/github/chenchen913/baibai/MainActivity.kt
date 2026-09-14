@@ -106,6 +106,9 @@ private sealed interface Screen {
     data object History : Screen
     data object Plan : Screen
 
+    /** 定位实验页（GPS Debug）：从记录页「定位回中」长按进入 */
+    data object GpsDebug : Screen
+
     /** 回顾页：fromHistory 标记进入来源，决定「返回」落点——
      *  历史页点开 → 返回历史页；结束复盘自动进入 → 返回记录页（可立即开始下一场） */
     data class Review(
@@ -219,6 +222,7 @@ fun AppRoot() {
                 onStartRequest = { requestStart() },
                 onHistory = { screen = Screen.History },
                 onPlan = { screen = Screen.Plan },
+                onGpsDebug = { screen = Screen.GpsDebug },
             )
 
             is Screen.Whitelist -> WhitelistGuideScreen(
@@ -246,6 +250,8 @@ fun AppRoot() {
                 year = java.time.LocalDate.now().year,
                 onBack = { screen = Screen.Record },
             )
+
+            is Screen.GpsDebug -> GpsDebugScreen(onBack = { screen = Screen.Record })
 
             is Screen.History -> HistoryScreen(
                 onBack = { screen = Screen.Record },

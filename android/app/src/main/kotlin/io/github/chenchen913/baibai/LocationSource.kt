@@ -6,6 +6,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
+import io.github.chenchen913.baibai.core.debug.RawLocationInfo
 import io.github.chenchen913.baibai.core.errors.GpsErrorKind
 import io.github.chenchen913.baibai.core.model.Fix
 import io.github.chenchen913.baibai.core.model.LatLng
@@ -59,14 +60,41 @@ class SystemLocationSource(
     @Volatile
     private var everGotGps = false
 
+    /** 定位实验：原始 Location 旁路回调。默认 null（关闭时不产生任何开销）。
+     *  在源侧网关判断**之前**调用，因此被网关丢弃的点也能被记录。 */
+    var debugSink: ((RawLocationInfo) -> Unit)? = null
+
     override val active: Boolean get() = running
     override val lastFix: Fix? get() = last
 
     override fun recent(n: Int): List<Fix> = buffer.takeLast(n)
 
     private val listener = object : LocationListener {
+        // 定位实验：isFromMockProvider() 在 API 31 起被标记废弃（改用 isMock()），
+        // 但我们仍读旧 API 以兼容 minSdk 26 —— 用函数级 @Suppress 收掉废弃告警，
+        // 不能把 @Suppress 内联写在表达式里（Kotlin 语法不支持）
+        @Suppress("DEPRECATION")
         override fun onLocationChanged(loc: Location) {
             val isGps = loc.provider == LocationManager.GPS_PROVIDER
+            // 定位实验（GPS Debug）：原始定位旁路。位置必须在 isGps 之后、网关判断之前——
+            // 网关的 return（everGotGps / NET_MAX_ACC_M）之前调用，被丢弃的点才能记录到。
+            // 该调用只把数据交给 GpsDebugRecorder，不改动下面任何网关逻辑。
+            debugSink?.invoke(
+                RawLocationInfo(
+                    receivedAtMs = clock(),
+                    fixTimeMs = loc.time,
+                    elapsedRealtimeNanos = loc.elapsedRealtimeNanos,
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    accuracy = loc.accuracy.toDouble(),
+                    provider = loc.provider ?: "unknown",
+                    src = if (isGps) "gps" else "net",
+                    speedMps = if (loc.hasSpeed()) loc.speed.toDouble() else null,
+                    bearingDeg = if (loc.hasBearing()) loc.bearing.toDouble() else null,
+                    altitudeM = if (loc.hasAltitude()) loc.altitude else null,
+                    isMock = loc.isFromMockProvider(),
+                ),
+            )
             if (isGps) {
                 if (!everGotGps) {
                     everGotGps = true

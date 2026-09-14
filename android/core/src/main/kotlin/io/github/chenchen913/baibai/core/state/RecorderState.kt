@@ -1,5 +1,6 @@
 package io.github.chenchen913.baibai.core.state
 
+import io.github.chenchen913.baibai.core.debug.GpsDecision
 import io.github.chenchen913.baibai.core.geo.Geo
 import io.github.chenchen913.baibai.core.model.Action
 import io.github.chenchen913.baibai.core.model.Checkpoint
@@ -67,6 +68,20 @@ class RecorderState private constructor(
     /** R9.1：本段（start/resume 起）行走起点时刻——静止门槛的"静止时长"只算段内，
      *  不把在户内停留的几分钟算进去（否则出门短走访 <50m 永远追不上门槛，整段零入库丢边） */
     private var segStartT = 0L
+
+    // ---------- 定位实验（GPS Debug）记录字段 ----------
+    // 这三个字段**只写不读**（除下面新增的三个 @Synchronized getter），
+    // 不参与任何 if 条件、不参与任何阈值计算——对过滤结果零影响。
+    // 它们只是把 addPoint() 里本来就算出来的中间结论抄一份给实验记录器（RecorderHub → GpsDebugRecorder）。
+
+    /** 最近一次 addPoint 的判定结果 label（初值=未在行走，与实际语义一致） */
+    private var lastDecisionLabel: String = GpsDecision.REJECTED_NOT_WALKING.label
+
+    /** 最近一次判定"距上一入库点"的距离（米）；本点未走到门槛计算时为 null（沿用上次值） */
+    private var lastDistToStoredM: Double? = null
+
+    /** 最近一次判定使用的静止门槛（米）；本点未走到门槛计算时为 null（沿用上次值） */
+    private var lastThresholdM: Double? = null
 
     companion object {
         private val seq = AtomicInteger(0)
@@ -140,6 +155,22 @@ class RecorderState private constructor(
     /** 检查点：会话 + 撤销历史 + 段计数 */
     @Synchronized
     fun checkpoint(): Checkpoint = Checkpoint(snapshot(), actions.toList(), segCounter)
+
+    // ---------- 定位实验（GPS Debug）只读访问器 ----------
+    // 这三个 getter 只暴露上面三个"只写"字段的当前值，供 RecorderHub 抄录到实验记录中；
+    // 它们不改变任何状态、不参与任何判定（改了也不影响过滤结果）。
+
+    /** 最近一次 addPoint 的判定 label（GpsDecision.label） */
+    @Synchronized
+    fun lastDecisionLabel(): String = lastDecisionLabel
+
+    /** 最近一次判定"距上一入库点"的距离（米）；未走到门槛计算时为 null */
+    @Synchronized
+    fun lastDistToStoredM(): Double? = lastDistToStoredM
+
+    /** 最近一次判定使用的静止门槛（米）；未走到门槛计算时为 null */
+    @Synchronized
+    fun lastThresholdM(): Double? = lastThresholdM
 
     /** IDLE → WALKING：确定 Home（中位数，允许 fallback） */
     @Synchronized
@@ -289,6 +320,7 @@ class RecorderState private constructor(
             now - prev.t < Constants.JUMP_DT_MS &&
             Geo.haversineM(prev.pos, pos) > Constants.JUMP_DIST_M
         ) {
+            lastDecisionLabel = GpsDecision.ACCEPTED_JUMP.label // 定位实验：仅记录，不参与判断
             val jumpPoint = TrackPoint(t = now, pos = pos, acc = acc, seg = seg, jump = true)
             points += jumpPoint
             return jumpPoint
@@ -300,7 +332,10 @@ class RecorderState private constructor(
         val p = TrackPoint(t = now, pos = cand, acc = acc, seg = seg)
         if (prev != null) {
             // ③ 窗口未满 3：不判定（攒样本）——防开始初期原始抖动点直入
-            if (smoothBuf.size < 3) return p
+            if (smoothBuf.size < 3) {
+                lastDecisionLabel = GpsDecision.REJECTED_WARMUP.label // 定位实验：仅记录
+                return p
+            }
             // ④ 静止门槛 = 精度自适应基线 + 段内静止时长增速，封顶 50m
             //    R9.1：静止时长从 max(上一入库点, 段起点) 起算——在户内停留的几分钟不算静止，
             //    否则出门后走访隔壁邻户（<50m）永远追不上门槛，整段零入库、回顾页丢边
@@ -308,15 +343,22 @@ class RecorderState private constructor(
             val idleSec = (now - max(prev.t, segStartT)) / 1000.0
             val thr = min(base + idleSec * Constants.IDLE_GROW_M_PER_S, Constants.MOVE_THR_IDLE_CAP_M)
             val dist = Geo.haversineM(prev.pos, cand)
+            lastDistToStoredM = dist // 定位实验：仅记录（复用上面已算出的 dist，不重算）
+            lastThresholdM = thr // 定位实验：仅记录（复用上面已算出的 thr，不重算）
             // ⑤ 连续确认：连续 MOVE_CONFIRM_N 个候选都超门槛才入库
             if (dist < thr) {
+                lastDecisionLabel = GpsDecision.REJECTED_STILL.label // 定位实验：仅记录
                 confirmCount = 0 // 回落 → 确认链断裂
                 return p
             }
             confirmCount += 1
-            if (confirmCount < Constants.MOVE_CONFIRM_N) return p
+            if (confirmCount < Constants.MOVE_CONFIRM_N) {
+                lastDecisionLabel = GpsDecision.REJECTED_NEED_CONFIRM.label // 定位实验：仅记录
+                return p
+            }
         }
         points += p
+        lastDecisionLabel = GpsDecision.ACCEPTED.label // 定位实验：仅记录
         lastGood = p // E-15：只有非跳变点才成为后续判定的基准
         smoothBuf.clear() // ⑥ 入库后窗口重置
         smoothBuf += cand
