@@ -71,8 +71,8 @@ class SystemLocationSource(
 
     private val listener = object : LocationListener {
         // 定位实验：isFromMockProvider() 在 API 31 起被标记废弃（改用 isMock()），
-        // 但我们仍读旧 API 以兼容 minSdk 26 —— 用函数级 @Suppress 收掉废弃告警，
-        // 不能把 @Suppress 内联写在表达式里（Kotlin 语法不支持）
+        // 但我们仍读旧 API 以兼容 minSdk 26 —— 用**函数级** @Suppress 收掉废弃告警
+        // （函数级可覆盖函数体内全部调用，也与本文件其它 @Suppress 写法一致）
         @Suppress("DEPRECATION")
         override fun onLocationChanged(loc: Location) {
             val isGps = loc.provider == LocationManager.GPS_PROVIDER

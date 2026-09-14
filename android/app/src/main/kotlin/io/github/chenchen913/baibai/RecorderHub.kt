@@ -114,8 +114,12 @@ object RecorderHub {
         source = SystemLocationSource(app.applicationContext)
         // 定位实验：挂上原始定位旁路（在源侧网关之前触发，被网关丢的点也能记录）。
         // 回调里再判开关——关闭状态下只是多一次布尔判断，不写任何数据。
-        (source as? SystemLocationSource)?.debugSink = { info ->
-            if (_debugEnabled.value) GpsDebugRecorder.onRawLocation(info)
+        // 用显式局部变量而非 `(source as? X)?.debugSink = ...`：语义等价，但少一处语法风险
+        val sysSource = source as? SystemLocationSource
+        if (sysSource != null) {
+            sysSource.debugSink = { info ->
+                if (_debugEnabled.value) GpsDebugRecorder.onRawLocation(info)
+            }
         }
         val prefs = app.applicationContext
             .getSharedPreferences("baibai_prefs", Context.MODE_PRIVATE)
@@ -457,6 +461,8 @@ object RecorderHub {
                         processedLat = null,
                         processedLng = null,
                     )
+                    // 这类记录同样要能落盘（否则只留在内存里，直到下次入库才被顺带写出）
+                    appendDebugFileThrottled()
                 }
             }
         }
