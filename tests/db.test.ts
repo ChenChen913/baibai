@@ -151,6 +151,31 @@ describe('db', () => {
     ).resolves.toBe(1);
   });
 
+  // 原子导入：修复前逐条 saveSession，第 N 条失败时前 N-1 条已经落库
+  it('导入失败不落库：后续条目非法时前面的也不写入', async () => {
+    const valid = {
+      id: 'ok_1',
+      year: 2026,
+      date: '2026-02-17',
+      nodes: [],
+      visits: [],
+      points: [],
+      home: { lat: 31, lng: 121 },
+      createdAt: 0,
+      updatedAt: 0,
+      state: 'FINISHED',
+      currentMode: 'walk',
+      finished: true,
+    };
+    const invalid = { ...valid, id: 'ok_2', nodes: 'not-an-array' };
+    await expect(
+      importAllJson(
+        JSON.stringify({ app: 'baibai', version: 1, sessions: [valid, invalid] }),
+      ),
+    ).rejects.toThrow(/不完整/);
+    expect(await listSessions()).toHaveLength(0);
+  });
+
   it('导入拒绝：清单条目缺名字', async () => {
     await expect(
       importAllJson(

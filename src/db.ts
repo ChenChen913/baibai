@@ -212,7 +212,9 @@ function assertPlanShape(p: unknown): void {
 }
 
 /** 全量导入（网页版/安卓版导出文件 → 本机，D2/契约 §1/§10）：
- * 校验 app/version（不符拒绝并提示升级）；忽略未知字段；sessions/plans 逐条校验后入库。
+ * 校验 app/version（不符拒绝并提示升级）；忽略未知字段。
+ * 先全量校验、再单事务写入：任一条不合法则一条都不落库（修复前逐条 saveSession，
+ * 第 N 条校验失败时前 N-1 条已经写进去了，与"不合规文件整体拒绝"的口径不一致）。
  * 返回导入的会话数。 */
 export async function importAllJson(text: string): Promise<number> {
   let raw: unknown;
@@ -232,23 +234,47 @@ export async function importAllJson(text: string): Promise<number> {
   if (!Array.isArray(sessions)) {
     throw new Error('备份内容不完整（缺少 sessions 字段）');
   }
+  const plans = obj?.plans;
+  if (plans !== undefined && !Array.isArray(plans)) {
+    throw new Error('备份中 plans 字段格式不正确');
+  }
+
+  // 阶段一：只校验，不碰数据库
+  const sessionRows: SessionData[] = [];
   for (const s of sessions as Array<Record<string, unknown>>) {
     const id = s?.id;
     if (typeof id !== 'string' || !SAFE_ID.test(id)) {
       throw new Error(`备份中存在不合法的会话 id：${String(id)}，已拒绝导入`);
     }
     assertSessionShape(s); // E-9：字段级校验（修复前只校验 id）
-    await saveSession(s as unknown as SessionData);
+    sessionRows.push(s as unknown as SessionData);
   }
-  const plans = obj?.plans;
-  if (plans !== undefined && !Array.isArray(plans)) {
-    throw new Error('备份中 plans 字段格式不正确');
+  const planRows: Plan[] = [];
+  for (const p of (plans ?? []) as Plan[]) {
+    assertPlanShape(p); // E-9：清单同样校验
+    planRows.push(p);
   }
-  if (Array.isArray(plans)) {
-    for (const p of plans as Plan[]) {
-      assertPlanShape(p); // E-9：清单同样校验
-      await savePlan(p);
-    }
+
+  // 阶段二：一个事务写两个 store——要么全进，要么全不进
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE_SESSIONS, STORE_PLANS], 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('导入写入失败'));
+      tx.onabort = () => reject(tx.error ?? new Error('导入已回滚'));
+      try {
+        const sessionStore = tx.objectStore(STORE_SESSIONS);
+        for (const s of sessionRows) sessionStore.put(s);
+        const planStore = tx.objectStore(STORE_PLANS);
+        for (const p of planRows) planStore.put(p);
+      } catch (e) {
+        tx.abort();
+        reject(e);
+      }
+    });
+  } finally {
+    db.close();
   }
-  return sessions.length;
+  return sessionRows.length;
 }
