@@ -38,16 +38,90 @@ export function tilesIn(
   return out;
 }
 
-/** 预载清单：Home ±0.02°（约 2.2km）× z13~z16（约 170 张、3.5MB；z16 足以辨认村巷），每级含普通+卫星 */
-export function preloadTileList(lat: number, lng: number): string[] {
+/** 预载覆盖下限：Home 周边 ±0.02°（约 2.2km）——单点场景与旧版行为一致 */
+export const PRELOAD_MIN_RADIUS_DEG = 0.02;
+/** 预载张数上限：超限时优先保覆盖、逐级降低最高缩放（避免清单无限膨胀） */
+export const PRELOAD_MAX_TILES = 800;
+const PRELOAD_Z_MIN = 13;
+const PRELOAD_Z_MAX = 16;
+
+export interface PreloadCoverage {
+  lat: number;
+  lng: number;
+  dLat: number;
+  dLng: number;
+}
+
+/** 由实际点位算预载覆盖框：至少 ±0.02°，并留 10% 余量（户/清单点位于边缘时不出现缺口） */
+export function preloadCoverage(
+  points: { lat: number; lng: number }[],
+): PreloadCoverage | null {
+  if (points.length === 0) return null;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  for (const p of points) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  return {
+    lat: (minLat + maxLat) / 2,
+    lng: (minLng + maxLng) / 2,
+    dLat: Math.max((maxLat - minLat) / 2, PRELOAD_MIN_RADIUS_DEG) * 1.1,
+    dLng: Math.max((maxLng - minLng) / 2, PRELOAD_MIN_RADIUS_DEG) * 1.1,
+  };
+}
+
+function coverageTiles(c: PreloadCoverage, zLo: number, zHi: number): string[] {
   const out: string[] = [];
-  for (let z = 13; z <= 16; z++) {
-    for (const [x, y] of tilesIn(lat, lng, 0.02, 0.02, z)) {
+  for (let z = zLo; z <= zHi; z++) {
+    for (const [x, y] of tilesIn(c.lat, c.lng, c.dLat, c.dLng, z)) {
       out.push(tileUrl('street', x, y, z));
       out.push(tileUrl('sat', x, y, z));
     }
   }
   return out;
+}
+
+/** 单点预载清单：Home ±0.02°（约 2.2km）× z13~z16（约 170 张、3.5MB；z16 足以辨认村巷），每级含普通+卫星 */
+export function preloadTileList(lat: number, lng: number): string[] {
+  const c = preloadCoverage([{ lat, lng }]);
+  if (!c) return [];
+  return coverageTiles(c, PRELOAD_Z_MIN, PRELOAD_Z_MAX);
+}
+
+/** 某级缩放下覆盖框内的瓦片数（含普通+卫星两层），只算数量不生成 URL */
+function tileCountAt(c: PreloadCoverage, z: number): number {
+  const x0 = tileX(c.lng - c.dLng, z);
+  const x1 = tileX(c.lng + c.dLng, z);
+  const y0 = tileY(c.lat + c.dLat, z);
+  const y1 = tileY(c.lat - c.dLat, z);
+  return (x1 - x0 + 1) * (y1 - y0 + 1) * 2;
+}
+
+/**
+ * 多点自适应预载：覆盖 Home + 已拜访户 + 今年清单坐标（走远不出界）。
+ * 先按数量预算选最高缩放（保住覆盖范围，牺牲细节），极端分散数据再截断——
+ * 绝不先生成巨大数组再丢弃（两点相隔 10° 时 z16 会达到百万级，直接把页面卡死）。
+ */
+export function preloadTileListFor(points: { lat: number; lng: number }[]): string[] {
+  const c = preloadCoverage(points);
+  if (!c) return [];
+  let total = 0;
+  let zHi = PRELOAD_Z_MIN;
+  for (let z = PRELOAD_Z_MIN; z <= PRELOAD_Z_MAX; z++) {
+    const n = tileCountAt(c, z);
+    if (total + n > PRELOAD_MAX_TILES) break;
+    total += n;
+    zHi = z;
+  }
+  const list = coverageTiles(c, PRELOAD_Z_MIN, zHi);
+  return list.length > PRELOAD_MAX_TILES
+    ? list.slice(0, PRELOAD_MAX_TILES)
+    : list;
 }
 /**
  * 缓存 key 规范化（SW 用）：把高德瓦片子域数字归一（webrd0X/webst0X → *），

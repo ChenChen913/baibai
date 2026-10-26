@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTileUrl, preloadTileList, tileUrl, tileX, tileY } from '../src/tiles.js';
+import {
+  PRELOAD_MAX_TILES,
+  normalizeTileUrl,
+  preloadTileList,
+  preloadTileListFor,
+  tileUrl,
+  tileX,
+  tileY,
+} from '../src/tiles.js';
 
 describe('瓦片数学（与安卓 TileMathTest 同值契约）', () => {
   it('瓦片号已知值', () => {
@@ -26,6 +34,34 @@ describe('瓦片数学（与安卓 TileMathTest 同值契约）', () => {
     expect(list.some((u) => u.includes('style=6'))).toBe(true);
     expect(list.some((u) => u.includes('style=8'))).toBe(true);
     expect(new Set(list).size).toBe(list.length); // 无重复
+  });
+
+  // 旧版只按 Home ±0.02° 预载：清单上的户在 2.2km 外时，离线去到那里会没图
+  it('多点预载覆盖所有已知点位（z16 瓦片齐全）', () => {
+    const pts = [
+      { lat: 36.71, lng: 119.1 },
+      { lat: 36.725, lng: 119.12 },
+      { lat: 36.7, lng: 119.08 },
+    ];
+    const list = preloadTileListFor(pts);
+    for (const p of pts) {
+      const url = `x=${tileX(p.lng, 16)}&y=${tileY(p.lat, 16)}&z=16`;
+      expect(list.some((u) => u.includes(url))).toBe(true);
+    }
+  });
+
+  it('预载上限：极端分散点位不超上限且仍有瓦片', () => {
+    const list = preloadTileListFor([
+      { lat: 0, lng: 0 },
+      { lat: 10, lng: 10 },
+    ]);
+    expect(list.length).toBeGreaterThan(0);
+    expect(list.length).toBeLessThanOrEqual(PRELOAD_MAX_TILES);
+    expect(list.some((u) => u.includes('z=13'))).toBe(true);
+  });
+
+  it('空点位返回空清单', () => {
+    expect(preloadTileListFor([])).toEqual([]);
   });
 
   it('normalizeTileUrl 去子域数字', () => {

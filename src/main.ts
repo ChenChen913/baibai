@@ -26,7 +26,8 @@ import {
 } from './db.js';
 import type { Fix } from './geo.js';
 import { cnyLabel, fromDateStr, toDateStr } from './cny.js';
-import { preloadTileList } from './tiles.js';
+import type { Plan } from './plan.js';
+import { preloadCoverage, preloadTileListFor } from './tiles.js';
 // E-16：对话框与转义函数抽到公共模块（原先 main/ui/review-ui/optimize-ui/plan-ui 各自复制了一份）
 import { confirmDialog, showToast } from './dialog.js';
 
@@ -118,23 +119,53 @@ function handleGpsError(kind: GpsErrorKind): void {
   ui.toast(tips[kind]);
 }
 
-// P0：瓦片预载（每个 Home 只自动预载一次；手动按钮随时可再触发）
+// P0：瓦片预载（覆盖 Home + 已访户 + 今年清单坐标；覆盖框变化时才自动重载，手动按钮随时可再触发）
 let preloadedFor = '';
-function startTilePreload(home: { lat: number; lng: number }): void {
-  const tiles = preloadTileList(home.lat, home.lng);
+let planCache: Plan | null = null;
+
+function preloadPoints(s: SessionData | null = null): { lat: number; lng: number }[] {
+  const snap = s ?? recorder?.snapshot ?? null;
+  const pts: { lat: number; lng: number }[] = [];
+  if (snap && (snap.home.lat !== 0 || snap.home.lng !== 0)) pts.push(snap.home);
+  if (snap) for (const n of snap.nodes) pts.push(n.pos);
+  // 清单上的目标户可能在旧版 ±2.2km 半径之外——纳入覆盖框，走远也不出界
+  for (const it of planCache?.items ?? []) if (it.pos) pts.push(it.pos);
+  return pts;
+}
+
+function startTilePreload(points: { lat: number; lng: number }[]): void {
+  const tiles = preloadTileListFor(points);
   const ctrl = navigator.serviceWorker?.controller;
   if (!ctrl) {
     ui.toast('离线预载需要 Service Worker（线上版本可用）');
     return;
   }
+  if (tiles.length === 0) {
+    ui.toast('还没有可预载的坐标');
+    return;
+  }
   ctrl.postMessage({ type: 'baibai-preload', tiles });
   ui.toast('正在预载周边地图（' + tiles.length + ' 张）…');
 }
-function maybePreloadTiles(home: { lat: number; lng: number }): void {
-  const key = home.lat.toFixed(4) + ',' + home.lng.toFixed(4);
+
+function maybePreloadTiles(s: SessionData | null = null): void {
+  // 首次加载时 SW 可能还没接管页面：自动预载静默跳过，等手动按钮或下次进入
+  if (!navigator.serviceWorker?.controller) return;
+  const pts = preloadPoints(s);
+  const cov = preloadCoverage(pts);
+  if (!cov) return;
+  // 覆盖框只在小数点后 4 位变化时才重载：新增就近户不会反复触发整批预载
+  const key =
+    cov.lat.toFixed(4) +
+    ',' +
+    cov.lng.toFixed(4) +
+    ',' +
+    cov.dLat.toFixed(4) +
+    ',' +
+    cov.dLng.toFixed(4);
   if (key === preloadedFor) return;
   preloadedFor = key;
-  startTilePreload(home);
+  startTilePreload(pts);
 }
 
 /** 把当前会话状态同步到地图（轨迹/节点/Home/当前位置） */
@@ -153,7 +184,7 @@ function syncMap(): void {
   });
   mapCtrl.setTrack(pts.map((p) => p.pos), breaks);
   mapCtrl.setNodes(s.home, s.nodes);
-  if (s.home.lat !== 0 || s.home.lng !== 0) maybePreloadTiles(s.home);
+  if (s.home.lat !== 0 || s.home.lng !== 0) maybePreloadTiles(s);
   // E-15：跟随目标取"非跳变"的最后一个点——否则地图会被拉到 900m 外的坏点位置
   const last = pts[pts.length - 1];
   if (last) mapCtrl.follow(last.pos.lat, last.pos.lng);
@@ -307,7 +338,9 @@ function mountRecord(): Ui {
     },
     onPlan() {
       void loadPlan(bizDate.getFullYear()).then((p) => {
-        ui.setPlan(p ?? null);
+        planCache = p ?? null;
+        ui.setPlan(planCache);
+        maybePreloadTiles();
       });
     },
     onFeedbackToggle() {
@@ -317,12 +350,9 @@ function mountRecord(): Ui {
       pickBizDate();
     },
     onPreload() {
-      const home = recorder?.snapshot.home;
-      if (home && (home.lat !== 0 || home.lng !== 0)) {
-        startTilePreload(home);
-      } else {
-        ui.toast('先开始拜年拿到定位，再点「预载」');
-      }
+      const pts = preloadPoints();
+      if (pts.length > 0) startTilePreload(pts);
+      else ui.toast('先开始拜年拿到定位，再点「预载」');
     },
     onRecenter() {
       mapCtrl?.recenter();
@@ -377,7 +407,9 @@ function mountRecord(): Ui {
   ui.setFeedbackOn(feedbackOn());
   ui.setDateLabel(cnyLabel(bizDate));
   void loadPlan(bizDate.getFullYear()).then((p) => {
-    ui.setPlan(p ?? null);
+    planCache = p ?? null;
+    ui.setPlan(planCache);
+    maybePreloadTiles();
   });
   return ui;
 }
