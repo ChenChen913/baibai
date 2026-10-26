@@ -176,6 +176,78 @@ describe('db', () => {
     expect(await listSessions()).toHaveLength(0);
   });
 
+  // 属性注入防护：节点 id 会进 innerHTML 属性，导入侧必须只放行安全字符，
+  // 且到访记录只能引用已声明的节点（否则回顾页渲染时会出现悬空引用）
+  it('导入拒绝：节点 id 非法或到访引用未知节点', async () => {
+    const base = {
+      id: 'ok_1',
+      year: 2026,
+      date: '2026-02-17',
+      points: [],
+      home: { lat: 31, lng: 121 },
+      createdAt: 0,
+      updatedAt: 0,
+      state: 'FINISHED',
+      currentMode: 'walk',
+      finished: true,
+    };
+    const node = { id: 'n_1', name: '户', autoNo: 1, pos: { lat: 31, lng: 121 } };
+    const badId = {
+      ...base,
+      nodes: [{ ...node, id: 'n_1" onclick="alert(1)' }],
+      visits: [],
+    };
+    await expect(
+      importAllJson(JSON.stringify({ app: 'baibai', version: 1, sessions: [badId] })),
+    ).rejects.toThrow(/节点/);
+
+    const badRef = {
+      ...base,
+      nodes: [node],
+      visits: [{ nodeId: 'n_missing', arriveT: 0, leaveT: null, mode: 'walk' }],
+    };
+    await expect(
+      importAllJson(JSON.stringify({ app: 'baibai', version: 1, sessions: [badRef] })),
+    ).rejects.toThrow(/不存在/);
+
+    const good = {
+      ...base,
+      nodes: [node],
+      visits: [{ nodeId: 'n_1', arriveT: 0, leaveT: null, mode: 'walk' }],
+    };
+    await expect(
+      importAllJson(JSON.stringify({ app: 'baibai', version: 1, sessions: [good] })),
+    ).resolves.toBe(1);
+  });
+
+  it('导入失败不落库：清单非法时会话也不写入', async () => {
+    const valid = {
+      id: 'ok_1',
+      year: 2026,
+      date: '2026-02-17',
+      nodes: [],
+      visits: [],
+      points: [],
+      home: { lat: 31, lng: 121 },
+      createdAt: 0,
+      updatedAt: 0,
+      state: 'FINISHED',
+      currentMode: 'walk',
+      finished: true,
+    };
+    await expect(
+      importAllJson(
+        JSON.stringify({
+          app: 'baibai',
+          version: 1,
+          sessions: [valid],
+          plans: [{ year: 2026, createdAt: 0, updatedAt: 0, items: [{}] }],
+        }),
+      ),
+    ).rejects.toThrow(/清单/);
+    expect(await listSessions()).toHaveLength(0);
+  });
+
   it('导入拒绝：清单条目缺名字', async () => {
     await expect(
       importAllJson(

@@ -1,6 +1,6 @@
 /** IndexedDB 持久化：活跃检查点 + 历史会话 + 今年清单 + 全量导出（D2/D22/M4） */
 
-import type { Checkpoint, SessionData } from './state.js';
+import { HOME_ID, type Checkpoint, type SessionData } from './state.js';
 import type { Plan } from './plan.js';
 
 const DB_NAME = 'baibai';
@@ -153,11 +153,18 @@ const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
 type Rec = Record<string, unknown>;
 
-const isPos = (v: unknown): boolean =>
-  typeof v === 'object' &&
-  v !== null &&
-  typeof (v as Rec).lat === 'number' &&
-  typeof (v as Rec).lng === 'number';
+const isPos = (v: unknown): boolean => {
+  if (typeof v !== 'object' || v === null) return false;
+  const { lat, lng } = v as Rec;
+  return (
+    typeof lat === 'number' &&
+    Number.isFinite(lat) &&
+    Math.abs(lat) <= 90 &&
+    typeof lng === 'number' &&
+    Number.isFinite(lng) &&
+    Math.abs(lng) <= 180
+  );
+};
 
 /**
  * E-9：导入的字段级校验。
@@ -167,7 +174,8 @@ const isPos = (v: unknown): boolean =>
  * 这里做"结构完整性"校验（不求逐字段类型完美），拒绝明显不完整的条目并给出可读原因。
  */
 function assertSessionShape(s: Rec): void {
-  const bad = (why: string): never => {
+  // 显式标注类型：TS 只对"显式返回 never 的 const 函数"做控制流收窄
+  const bad: (why: string) => never = (why) => {
     throw new Error(`备份中的会话数据不完整（${why}），已拒绝导入`);
   };
   if (!Array.isArray(s.nodes)) bad('nodes 不是数组');
@@ -181,17 +189,36 @@ function assertSessionShape(s: Rec): void {
   if (typeof s.state !== 'string') bad('state 缺失');
   if (typeof s.currentMode !== 'string') bad('currentMode 缺失');
   if (typeof s.finished !== 'boolean') bad('finished 缺失');
+  const nodeIds = new Set<string>();
   for (const n of s.nodes as Rec[]) {
-    if (typeof n?.id !== 'string' || typeof n?.autoNo !== 'number' || !isPos(n?.pos)) {
-      bad('节点字段缺失');
+    if (
+      typeof n?.id !== 'string' ||
+      !SAFE_ID.test(n.id) ||
+      typeof n?.name !== 'string' ||
+      typeof n?.autoNo !== 'number' ||
+      !isPos(n?.pos)
+    ) {
+      bad('节点字段缺失或 id 非法');
     }
+    if (nodeIds.has(n.id)) bad('节点 id 重复');
+    nodeIds.add(n.id);
   }
   for (const p of s.points as Rec[]) {
-    if (typeof p?.t !== 'number' || !isPos(p?.pos)) bad('轨迹点字段缺失');
+    if (typeof p?.t !== 'number' || !Number.isFinite(p.t) || !isPos(p?.pos)) {
+      bad('轨迹点字段缺失');
+    }
   }
   for (const v of s.visits as Rec[]) {
-    if (typeof v?.nodeId !== 'string' || typeof v?.arriveT !== 'number') {
-      bad('到访记录字段缺失');
+    if (
+      typeof v?.nodeId !== 'string' ||
+      !SAFE_ID.test(v.nodeId) ||
+      typeof v?.arriveT !== 'number' ||
+      !Number.isFinite(v.arriveT)
+    ) {
+      bad('到访记录字段缺失或 id 非法');
+    }
+    if (v.nodeId !== HOME_ID && !nodeIds.has(v.nodeId)) {
+      bad('到访记录引用了不存在的节点');
     }
   }
 }

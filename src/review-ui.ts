@@ -170,13 +170,13 @@ export function mountReviewView(
   function renderNodes(): void {
     const box = $('rv-nodes');
     box.innerHTML = s.nodes
-      .map((n) => {
+      .map((n, idx) => {
         const visits = s.visits.filter((v) => v.nodeId === n.id);
         return (
           `<div class="node-row">` +
           `<span class="nlabel">户${n.autoNo}</span>` +
-          `<input id="name-${n.id}" value="${esc(n.name)}" placeholder="起个名（如大伯家）"/>` +
-          `<button data-rename="${n.id}" class="secondary small">改名</button>` +
+          `<input id="name-${idx}" value="${esc(n.name)}" placeholder="起个名（如大伯家）"/>` +
+          `<button data-rename="${esc(n.id)}" data-input="name-${idx}" class="secondary small">改名</button>` +
           `<span class="visits">到访 ${visits.length} 次</span>` +
           visits
             .map((v) => {
@@ -191,7 +191,8 @@ export function mountReviewView(
     box.querySelectorAll<HTMLElement>('[data-rename]').forEach((b) => {
       b.addEventListener('click', () => {
         const id = b.dataset.rename!;
-        const input = box.querySelector<HTMLInputElement>(`#name-${id}`)!;
+        // 输入框 id 用下标（数字安全），避免把外部导入的节点 id 拼进选择器
+        const input = box.querySelector<HTMLInputElement>(`#${b.dataset.input}`)!;
         mutate(renameNode(s, id, input.value.trim()));
       });
     });
@@ -219,7 +220,7 @@ export function mountReviewView(
     box.innerHTML = s.nodes
       .map(
         (n) =>
-          `<button class="chip merge-chip" data-mid="${n.id}">${esc(labelOf(n.id))}</button>`,
+          `<button class="chip merge-chip" data-mid="${esc(n.id)}">${esc(labelOf(n.id))}</button>`,
       )
       .join('');
     const selected: string[] = [];
@@ -335,7 +336,7 @@ export function mountReviewView(
             cands
               .map(
                 (c, k) =>
-                  `<button data-apply="${n.id}" data-name="${esc(c.name)}" class="chip">${esc(c.name)}（${Math.round(c.distM)}m）</button>`,
+                  `<button data-apply="${esc(n.id)}" data-name="${esc(c.name)}" class="chip">${esc(c.name)}（${Math.round(c.distM)}m）</button>`,
               )
               .join('') +
             `</div>`
