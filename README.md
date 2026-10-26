@@ -130,7 +130,7 @@ src/
 
 ```sh
 npm run dev      # 开发服务器 → http://localhost:3000
-npm test         # 单元测试（158 项）
+npm test         # 单元测试（167 项）
 npm run lint     # 类型检查（tsc --noEmit）
 npm run build    # 类型检查 + 生产构建 → dist/
 npm run preview  # 本地预览生产构建
@@ -144,7 +144,7 @@ npm run preview  # 本地预览生产构建
  ✓ tests/village-sim.test.ts (2 tests) 443ms
 
  Test Files  18 passed (18)
-      Tests  158 passed (158)
+      Tests  167 passed (167)
 ```
 
 其中 `village-sim.test.ts` 会用固定随机种子模拟一个真实的村庄：15~20 户散布在约 950m × 720m 范围内，按刻意绕路的蛇形顺序拜访，叠加 GPS 抖动、户内停留、一段骑行和一次回访，最后校验三线结果与性能。
@@ -190,7 +190,7 @@ A：可以。网页版与安卓版共用同一份数据格式（见 [android/数
 - **安卓版是 debug 签名**：仅供自用安装，未做 release 签名与商店上架。
 - **边级异常样本识别尚未实现**：需求里写过「比同边中位数慢 2 倍标异常」，目前只实现了轨迹点级的跳变防护与人工剔除，边级自动识别未落地（[docs/项目需求文档.md](docs/项目需求文档.md) 已如实标注）。
 - **安卓端尚无自动化 UI 测试**：Compose 界面层靠真机验收，CI 只覆盖编译与 core/app 单元测试。
-- **地图瓦片来自第三方**：默认用高德瓦片（失败自动回退 OSM / Esri），离线时靠 Service Worker 缓存，未预载的区域断网会显示空白底图，但轨迹与标记照常绘制。
+- **地图瓦片来自第三方**：默认用高德瓦片（非官方开放接口，可能限流或变更；失败自动回退 OSM / Esri），离线时靠 Service Worker 缓存；预载覆盖家、已访户与清单目标周边（上限 800 张，超范围时逐级降低最高缩放），覆盖框之外断网会显示空白底图，但轨迹与标记照常绘制。
 
 ## 如何贡献
 
