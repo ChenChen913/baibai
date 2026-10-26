@@ -5,8 +5,9 @@ import { ICONS } from './icons.js';
 import { launchConfetti } from './confetti.js';
 import type { Plan } from './plan.js';
 import { buildEdges } from './track.js';
-import { cnyLabel, fromDateStr } from './cny.js';
-import { esc, showToast } from './dialog.js';
+import { showToast } from './dialog.js';
+import { createPlanDrawer } from './plan-drawer.js';
+import { renderHistoryDrawer } from './history-drawer.js';
 
 export interface UiCallbacks {
   onStart(): void;
@@ -448,6 +449,19 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
   let currentPlan: Plan | null = null;
   let lastNodeCount = 0;
 
+  // E-11：清单抽屉的模板与内容指纹缓存拆到 plan-drawer.ts（render 每秒跑一次，只在数据真变时重建）
+  const planDrawer = createPlanDrawer(
+    {
+      list: $('drawer-plan-list'),
+      badge: $('drawer-plan-badge'),
+      dot: $('plan-badge-dot'),
+    },
+    (no) => {
+      closeDrawer('plan');
+      cb.onFocusNode?.(no);
+    },
+  );
+
   function render(
     s: SessionData | null,
     elapsedMs: number,
@@ -546,198 +560,25 @@ export function mountUi(root: HTMLElement, cb: UiCallbacks): Ui {
       ? 'tab-item tab-active'
       : 'tab-item text-stone-500';
 
-    renderPlanDrawer(s);
+    planDrawer.render(s, currentPlan);
   }
 
   function setPlan(p: Plan | null): void {
     currentPlan = p;
-    lastPlanKey = ''; // 清单变化 → 下次 render 强制重建列表
-  }
-
-  /** E-11：清单抽屉列表的"内容指纹"——render() 每秒跑一次，
-   *  修复前无条件 innerHTML 重建整个列表：用户滚动位置被重置、点击被打断、
-   *  100 户清单时每秒重建上百个 DOM 节点。现在只有内容真变了才重建。 */
-  let lastPlanKey = '';
-
-  function renderPlanDrawer(s: SessionData | null): void {
-    const planKey = [
-      s?.state ?? '',
-      s?.currentMode ?? '',
-      s?.nodes.length ?? 0,
-      s?.nodes.map((n) => `${n.id}:${n.name}:${n.autoNo}`).join(','),
-      currentPlan?.updatedAt ?? 0,
-      currentPlan?.items.length ?? 0,
-    ].join('|');
-    if (planKey === lastPlanKey) return;
-    lastPlanKey = planKey;
-
-    const listEl = $('drawer-plan-list');
-    const badgeEl = $('drawer-plan-badge');
-    const badgeDot = $('plan-badge-dot');
-
-    const visitedCount = s?.nodes.length ?? 0;
-    const planItems = currentPlan?.items ?? [];
-    const totalCount = planItems.length;
-
-    badgeEl.textContent = `${visitedCount}/${totalCount > 0 ? totalCount : visitedCount} 已拜`;
-    badgeDot.style.display = totalCount > visitedCount ? 'block' : 'none';
-
-    if (totalCount === 0 && visitedCount === 0) {
-      listEl.innerHTML = `
-        <div class="p-4 text-center space-y-2">
-          <div class="text-amber-600 text-2xl">📋</div>
-          <div class="text-xs font-bold text-stone-700">暂无拜访清单</div>
-          <div class="text-[11px] text-stone-400">可点击下方「导入去年」或「手动添加新拜访户」</div>
-        </div>
-      `;
-      return;
-    }
-
-    let html = '';
-
-    // 起点卡片
-    html += `
-      <div class="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between shadow-xs">
-        <div class="flex items-center gap-2">
-          <div class="w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-[10px]">
-            ${ICONS.house}
-          </div>
-          <div>
-            <div class="font-bold text-xs text-stone-800">起点：自家庭院</div>
-            <div class="text-[10px] text-stone-400">大年初一 出发点</div>
-          </div>
-        </div>
-        <span class="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">出发点</span>
-      </div>
-    `;
-
-    // 已拜访各户 (nodes)
-    if (s && s.nodes.length > 0) {
-      s.nodes.forEach((n, idx) => {
-        const isCurrent = s.state === 'PAUSED' && idx === s.nodes.length - 1;
-        const name = n.name || `第 ${n.autoNo} 户`;
-
-        if (isCurrent) {
-          html += `
-            <div class="p-2.5 rounded-xl bg-red-50 border border-red-200 flex items-center justify-between shadow-xs">
-              <div class="flex items-center gap-2">
-                <div class="w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center font-bold text-[10px] animate-pulse">
-                  ${n.autoNo}
-                </div>
-                <div>
-                  <div class="font-bold text-xs text-red-700">${n.autoNo}. ${esc(name)} (当前停留点)</div>
-                  <div class="text-[10px] text-stone-500">正在喝茶拜年中…</div>
-                </div>
-              </div>
-              <span class="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded">当前位置</span>
-            </div>
-          `;
-        } else {
-          html += `
-            <div class="p-2.5 rounded-xl bg-white border border-stone-200/80 flex items-center justify-between shadow-xs">
-              <div class="flex items-center gap-2">
-                <div class="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-[10px]">
-                  ${ICONS.check}
-                </div>
-                <div>
-                  <div class="font-bold text-xs text-stone-500 line-through">${n.autoNo}. ${esc(name)}</div>
-                  <div class="text-[10px] text-stone-400">已顺利完成拜访</div>
-                </div>
-              </div>
-              <span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">已拜访</span>
-            </div>
-          `;
-        }
-      });
-    }
-
-    // 未拜访清单项
-    if (planItems.length > visitedCount) {
-      for (let i = visitedCount; i < planItems.length; i++) {
-        const item = planItems[i];
-        const num = i + 1;
-        html += `
-          <div class="p-2.5 rounded-xl bg-white border border-stone-200 flex items-center justify-between shadow-xs">
-            <div class="flex items-center gap-2">
-              <div class="w-6 h-6 rounded-full bg-stone-200 text-stone-700 flex items-center justify-center font-bold text-[10px]">
-                ${num}
-              </div>
-              <div>
-                <div class="font-bold text-xs text-stone-800">${num}. ${esc(item.name)}</div>
-                <div class="text-[10px] text-stone-400">待拜访 · 路线已优化规划</div>
-              </div>
-            </div>
-            <button data-focus-node="${num}" class="text-[10px] font-bold text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition">
-              定位导航
-            </button>
-          </div>
-        `;
-      }
-    }
-
-    listEl.innerHTML = html;
-
-    listEl.querySelectorAll<HTMLElement>('[data-focus-node]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const no = Number(btn.dataset.focusNode);
-        closeDrawer('plan');
-        cb.onFocusNode?.(no);
-      });
-    });
+    planDrawer.invalidate(); // 清单变化 → 下次 render 强制重建列表
   }
 
   function setHistorySessions(sessions: SessionData[], statsMap?: Map<string, string>): void {
-    const listEl = $('drawer-history-list');
-    const summaryEl = $('drawer-history-summary');
-
-    if (sessions.length === 0) {
-      summaryEl.innerHTML = '';
-      listEl.innerHTML = `
-        <div class="p-6 text-center space-y-2">
-          <div class="text-2xl">🧧</div>
-          <div class="text-xs font-bold text-stone-700">暂无往年拜年记录</div>
-          <div class="text-[11px] text-stone-400">初一拜年结束后自动保存，也可点上方「生成演示数据」体验</div>
-        </div>
-      `;
-      return;
-    }
-
-    // 渲染历史记录卡片
-    listEl.innerHTML = sessions.map((s) => {
-      const statText = statsMap?.get(s.id) || `${s.nodes.length} 户`;
-      return `
-        <div class="p-3.5 rounded-2xl bg-white border border-stone-200/90 shadow-xs space-y-2.5">
-          <div class="flex justify-between items-center">
-            <div class="font-bold text-stone-800 text-xs">${esc(s.date)} · ${esc(cnyLabel(fromDateStr(s.date)))}</div>
-            <span class="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded">拜访 ${s.nodes.length} 户</span>
-          </div>
-          <div class="text-xs text-stone-600 bg-stone-50 p-2 rounded-xl">
-            ${esc(statText)}
-          </div>
-          <div class="flex justify-end gap-2 pt-1">
-            <button data-history-id="${s.id}" class="px-3 py-1.5 rounded-lg bg-red-600 text-white font-bold text-[11px] shadow-xs hover:bg-red-700 active:scale-95 transition flex items-center gap-1">
-              ${ICONS.play} 轨迹回放与三线复盘
-            </button>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    listEl.querySelectorAll<HTMLElement>('[data-history-id]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.historyId!;
+    renderHistoryDrawer(
+      $('drawer-history-list'),
+      $('drawer-history-summary'),
+      sessions,
+      statsMap,
+      (id) => {
         closeDrawer('history');
         cb.onSelectHistory?.(id);
-      });
-    });
-
-    // 历年绕路趋势
-    summaryEl.innerHTML = `
-      <div class="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between text-xs text-amber-900">
-        <span class="font-bold">📊 已累计记录 ${sessions.length} 年拜年轨迹</span>
-        <span class="text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-bold">算法 Held-Karp 精确解</span>
-      </div>
-    `;
+      },
+    );
   }
 
   function setDateLabel(label: string): void {

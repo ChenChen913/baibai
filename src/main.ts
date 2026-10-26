@@ -9,6 +9,7 @@ import { mountMap, type MapController } from './map-ui.js';
 import { mountReviewView } from './review-ui.js';
 import { mountOptimizeView } from './optimize-ui.js';
 import { mountPlanView } from './plan-ui.js';
+import { mountHistoryView } from './history-ui.js';
 import { generateDemoSession } from './demo.js';
 import { analyze, analyzeSync, type AnalyzeResult } from './compute.js';
 import type { SessionData } from './state.js';
@@ -27,7 +28,7 @@ import type { Fix } from './geo.js';
 import { cnyLabel, fromDateStr, toDateStr } from './cny.js';
 import { preloadTileList } from './tiles.js';
 // E-16：对话框与转义函数抽到公共模块（原先 main/ui/review-ui/optimize-ui/plan-ui 各自复制了一份）
-import { confirmDialog, esc as escHtml, showToast } from './dialog.js';
+import { confirmDialog, showToast } from './dialog.js';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 const gps = new GpsTracker();
@@ -592,133 +593,35 @@ function showPlanView(): void {
 async function showHistory(): Promise<void> {
   leaveRecord();
   view = 'history';
-  const sessions = (await listSessions()).sort((a, b) => b.createdAt - a.createdAt);
-  app.innerHTML = `
-    <div class="wrap">
-      <header><h1>历史记录</h1></header>
-      <button id="h-back" class="secondary">← 返回记录</button>
-      <button id="h-demo" class="secondary">生成演示数据</button>
-      <div class="h-actions">
-        <button id="h-export" class="primary small">导出 JSON</button>
-        <button id="h-import" class="ghost small">导入 JSON</button>
-        <input id="h-file" type="file" accept="application/json,.json" style="display:none"/>
-      </div>
-      <p class="h-hint">导出/导入与安卓版同一格式：安卓记录 → 电脑复盘，或反之。</p>
-      <div id="h-summary" class="h-summary"></div>
-      <div id="h-list" class="history-list"></div>
-    </div>`;
-  // E-20：toast 用全局实现（挂 body），视图切换后依然可见
-  const toast = showToast;
-  app.querySelector<HTMLElement>('#h-back')!.addEventListener('click', () => {
-    view = 'record';
-    ui = mountRecord();
-  });
-  app.querySelector<HTMLElement>('#h-demo')!.addEventListener('click', () => {
+  await mountHistoryView(app, {
+    onBack: () => {
+      view = 'record';
+      ui = mountRecord();
+    },
     // 演示会话不落库，仅在内存中回放/收拾
-    showReview(generateDemoSession(), 'history', false); // E-4：历史页点开 → 返回历史页
+    onDemo: () => showReview(generateDemoSession(), 'history', false),
+    onExport: () => {
+      void doExport().catch((e: unknown) =>
+        showToast(e instanceof Error ? e.message : '导出失败'),
+      );
+    },
+    onImportFile: (f) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        importAllJson(String(reader.result ?? ''))
+          .then(async (n) => {
+            showToast(`已导入 ${n} 场拜年记录`);
+            await showHistory();
+          })
+          .catch((e: unknown) => showToast(e instanceof Error ? e.message : '导入失败'));
+      };
+      reader.onerror = () => showToast('读取文件失败');
+      reader.readAsText(f);
+    },
+    onSelectSession: (s) => showReview(s, 'history'), // 历史页点开 → 返回历史页
+    listSessions: () => listSessions(),
+    statFor,
   });
-  app.querySelector<HTMLElement>('#h-export')!.addEventListener('click', () => {
-    void doExport().catch((e: unknown) => toast(e instanceof Error ? e.message : '导出失败'));
-  });
-  const fileInput = app.querySelector<HTMLInputElement>('#h-file')!;
-  app.querySelector<HTMLElement>('#h-import')!.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => {
-    const f = fileInput.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      importAllJson(String(reader.result ?? ''))
-        .then(async (n) => {
-          toast(`已导入 ${n} 场拜年记录`);
-          await showHistory();
-        })
-        .catch((e: unknown) => toast(e instanceof Error ? e.message : '导入失败'));
-    };
-    reader.onerror = () => toast('读取文件失败');
-    reader.readAsText(f);
-    fileInput.value = '';
-  });
-  const list = app.querySelector<HTMLElement>('#h-list')!;
-  const summary = app.querySelector<HTMLElement>('#h-summary')!;
-  if (sessions.length === 0) {
-    summary.innerHTML = '';
-    list.innerHTML = '<p class="empty">还没有记录。大年初一，出发！</p>';
-  } else {
-    list.innerHTML = sessions
-      .map(
-        (s) =>
-          `<button class="history-item" data-id="${escHtml(s.id)}">${escHtml(s.date)} · 计算中…</button>`,
-      )
-      .join('');
-    void Promise.all(
-      sessions.map(async (s) => ({ s, stat: await statFor(s) })),
-    ).then((rows) => {
-      rows.forEach(({ s, stat }) => {
-        // E-10：按 dataset 比较而非拼选择器——id 已转义进属性，
-        // 再拼进 querySelector 会被特殊字符破坏（防御一致性）
-        const el = [...list.querySelectorAll<HTMLElement>('[data-id]')].find(
-          (b) => b.dataset.id === s.id,
-        );
-        if (el) el.textContent = `${s.date} · ${stat}`;
-      });
-      renderYearSummary(summary, rows); // P15：历年成绩单 + 绕路率趋势线
-    });
-  }
-  list.querySelectorAll<HTMLElement>('[data-id]').forEach((b) => {
-    b.addEventListener('click', () => {
-      const sess = sessions.find((x) => x.id === b.dataset.id);
-      if (sess) showReview(sess, 'history'); // 历史页点开 → 返回历史页
-    });
-  });
-}
-
-/** P15/F-15：历年成绩单卡片 + 绕路率逐年趋势线（按年聚合，不混数据） */
-function renderYearSummary(
-  el: HTMLElement,
-  rows: { s: SessionData; stat: string }[],
-): void {
-  const byYear = new Map<number, { n: number; km: number; sumPct: number }>();
-  for (const { s, stat } of rows) {
-    const m = /(\d+\.\d+) km .*绕路率 (\d+)%/.exec(stat);
-    const km = m ? parseFloat(m[1]) : 0;
-    const pct = m ? parseInt(m[2], 10) : 0;
-    const cur = byYear.get(s.year) ?? { n: 0, km: 0, sumPct: 0 };
-    cur.n += 1;
-    cur.km += km;
-    cur.sumPct += pct;
-    byYear.set(s.year, cur);
-  }
-  const years = [...byYear.keys()].sort((a, b) => a - b);
-  const cards = years
-    .map((y) => {
-      const v = byYear.get(y)!;
-      return `<div class="year-card"><b>${y} 年</b><span>${v.n} 场 · ${v.km.toFixed(2)} km · 平均绕路率 ${Math.round(v.sumPct / v.n)}%</span></div>`;
-    })
-    .join('');
-  let chart = '';
-  if (years.length >= 2) {
-    const cw = 300;
-    const ch = 60;
-    const pad = 8;
-    const pts = years.map((y) => {
-      const v = byYear.get(y)!;
-      const avg = v.sumPct / v.n;
-      const x = pad + ((y - years[0]) / Math.max(1, years[years.length - 1] - years[0])) * (cw - pad * 2);
-      const yc = ch - pad - (Math.min(100, avg) / 100) * (ch - pad * 2);
-      return { x, y: yc, avg };
-    });
-    const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    const dots = pts
-      .map(
-        (p) =>
-          `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#c8402f"/>` +
-          `<text x="${p.x.toFixed(1)}" y="${(p.y - 6).toFixed(1)}" text-anchor="middle" font-size="8" fill="#5a3a2a">${Math.round(p.avg)}%</text>`,
-      )
-      .join('');
-    chart = `<div class="trend"><span class="trend-title">绕路率趋势（逐年平均）</span>` +
-      `<svg viewBox="0 0 ${cw} ${ch}">${dots}<path d="${line}" fill="none" stroke="#c8402f" stroke-width="2" stroke-linecap="round"/></svg></div>`;
-  }
-  el.innerHTML = cards + chart;
 }
 
 /** 会话统计（D22.1 Worker 化 + P26 内存缓存：同一会话多次进历史不重算）。
